@@ -1,0 +1,6 @@
+{
+  "name": "Jiji Ghana Marketplace & Seller Management System",
+  "description": "Buy and sell anything in Ghana. Real-time marketplace with comprehensive seller inventory management, product listing, and sales performance tracking.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
