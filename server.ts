@@ -133,6 +133,21 @@ app.post('/api/products', (req: Request, res: Response) => {
   }
 });
 
+app.post('/api/products/sync-all', (req: Request, res: Response) => {
+  try {
+    const products = req.body;
+    if (Array.isArray(products)) {
+      writeProducts(products);
+      broadcastProducts(products);
+      return res.json({ success: true, count: products.length });
+    }
+    res.status(400).json({ error: 'Array expected' });
+  } catch (error) {
+    console.error('Failed to sync-all products:', error);
+    res.status(500).json({ error: 'Failed to sync-all' });
+  }
+});
+
 app.put('/api/products/:id', (req: Request, res: Response) => {
   try {
     const { id } = req.params;

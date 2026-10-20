@@ -46,8 +46,9 @@ export const MarketplaceView: React.FC = () => {
     const matchesRegion = !selectedRegion || p.region === selectedRegion;
     const matchesCondition = conditionFilter === 'all' || p.condition === conditionFilter;
     const matchesPrice = maxPrice === '' || p.price <= maxPrice;
+    const isActive = p.status === 'active' || p.status === 'boosted' || !p.status;
 
-    return matchesSearch && matchesCategory && matchesRegion && matchesCondition && matchesPrice;
+    return isActive && matchesSearch && matchesCategory && matchesRegion && matchesCondition && matchesPrice;
   });
 
   // Sorting

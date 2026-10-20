@@ -13,6 +13,12 @@ import {
 import { INITIAL_PRODUCTS, INITIAL_ORDERS, INITIAL_INQUIRIES, INITIAL_ANNOUNCEMENT } from '../data/initialProducts';
 import { INITIAL_CONVERSATIONS } from '../data/initialConversations';
 import { getEmailProfilePhoto } from '../utils/avatar';
+import {
+  fetchOnlineProducts,
+  publishProductToCloud,
+  updateProductInCloud,
+  deleteProductFromCloud
+} from '../services/productDatabase';
 
 interface AppContextType {
   user: UserProfile | null;
@@ -187,26 +193,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     'prod-001', 'prod-002', 'prod-003', 'prod-004', 'prod-005', 'prod-006', 'prod-007', 'prod-008'
   ]);
 
-  // Products
+  // Products - initialized from shared cloud cache or initial state
   const [products, setProducts] = useState<Product[]>(() => {
     try {
-      // Purge the previous item in the shop as requested
-      const purgeKey = 'godysell_shop_item_deleted_v2';
-      if (!localStorage.getItem(purgeKey)) {
-        localStorage.removeItem('jiji_gh_products');
-        localStorage.setItem(purgeKey, 'true');
-        return [];
+      const cached = localStorage.getItem('godysell_shared_products_cache');
+      if (cached) {
+        const parsed: Product[] = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
       }
       const saved = localStorage.getItem('jiji_gh_products');
       if (saved) {
         const parsed: Product[] = JSON.parse(saved);
-        return parsed.filter((p) => {
-          if (DEFAULT_PRODUCT_IDS.has(p.id) || p.id.startsWith('prod-00')) return false;
-          if (p.sellerEmail?.endsWith('@godysell.com') && p.sellerEmail !== 'godfredowusu370@gmail.com') {
-            return false;
-          }
-          return true;
-        });
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
       }
     } catch (e) {
       console.error(e);
@@ -531,29 +533,44 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, [products]);
 
-  // Real-Time Shared Cross-Device Product Synchronization
-  // Ensures any product published by any seller reflects instantly on everyone's phones
+  // Real-Time Shared Cross-Device Product Synchronization with Cloud Database
+  // Ensures any product published by any seller on any device reflects on everyone's phones
   useEffect(() => {
     let isMounted = true;
 
-    const fetchLatestProducts = async () => {
+    const syncProducts = async () => {
       try {
-        const res = await fetch('/api/products');
-        if (res.ok) {
-          const remoteProducts: Product[] = await res.json();
-          if (isMounted && Array.isArray(remoteProducts)) {
-            setProducts(remoteProducts);
-          }
+        const liveProducts = await fetchOnlineProducts();
+        if (isMounted && Array.isArray(liveProducts)) {
+          setProducts((current) => {
+            // Only update state if products changed to prevent unnecessary re-renders
+            if (JSON.stringify(current) !== JSON.stringify(liveProducts)) {
+              return liveProducts;
+            }
+            return current;
+          });
         }
       } catch (err) {
-        // Fallback to local state if offline
+        console.warn('Sync failed:', err);
       }
     };
 
-    // 1. Initial fast load from shared server
-    fetchLatestProducts();
+    // 1. Immediate sync on mount
+    syncProducts();
 
-    // 2. Real-Time Server-Sent Events (SSE) connection
+    // 2. Poll every 4 seconds so cross-device updates appear automatically
+    const pollInterval = setInterval(syncProducts, 4000);
+
+    // 3. Sync immediately when tab/phone becomes visible or focused
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        syncProducts();
+      }
+    };
+    window.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', syncProducts);
+
+    // 4. Also listen to SSE stream if available (for local dev server)
     let eventSource: EventSource | null = null;
     try {
       eventSource = new EventSource('/api/products/stream');
@@ -568,19 +585,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           // ignore keepalive
         }
       };
-      eventSource.onerror = () => {
-        // Browser handles auto-reconnect
-      };
-    } catch (e) {
-      console.warn('SSE stream error:', e);
+      eventSource.onerror = () => {};
+    } catch {
+      // Handled by polling
     }
-
-    // 3. Periodic fallback poll every 5s for mobile network stability
-    const pollInterval = setInterval(fetchLatestProducts, 5000);
 
     return () => {
       isMounted = false;
       clearInterval(pollInterval);
+      window.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', syncProducts);
       if (eventSource) {
         eventSource.close();
       }
@@ -648,15 +662,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       createdAt: new Date().toISOString()
     };
 
-    // Optimistic update
+    // 1. Optimistic update in state
     setProducts((prev) => [newProduct, ...prev.filter(p => p.id !== newProduct.id)]);
 
-    // Broadcast & persist to shared server so it immediately reflects on every phone
+    // 2. Persist to shared online cloud database so it appears on all phones and accounts
+    publishProductToCloud(newProduct).catch((err) => console.error('Cloud publish error:', err));
+
+    // 3. Also post to local /api/products if local server is running
     fetch('/api/products', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(newProduct)
-    }).catch((err) => console.error('Failed to post product to server:', err));
+    }).catch(() => {});
   };
 
   const updateProduct = (id: string, updates: Partial<Product>) => {
@@ -672,12 +689,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setSelectedProduct((prev) => (prev ? { ...prev, ...updates } : null));
     }
 
-    // Broadcast update to all phones
+    // Persist to shared online cloud database
+    updateProductInCloud(id, updates).catch((err) => console.error('Cloud update error:', err));
+
+    // Also update local server endpoint
     fetch(`/api/products/${encodeURIComponent(id)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(updates)
-    }).catch((err) => console.error('Failed to update product on server:', err));
+    }).catch(() => {});
   };
 
   const deleteProduct = (id: string) => {
@@ -689,7 +709,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setProducts((prev) => {
       const updated = prev.filter((p) => p.id !== id);
       try {
-        localStorage.setItem('jiji_gh_products', JSON.stringify(updated));
+        localStorage.setItem('godysell_shared_products_cache', JSON.stringify(updated));
       } catch (e) {
         console.error(e);
       }
@@ -699,10 +719,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setSelectedProduct(null);
     }
 
-    // Broadcast deletion to all phones
+    // Persist deletion to shared online cloud database
+    deleteProductFromCloud(id).catch((err) => console.error('Cloud delete error:', err));
+
+    // Also delete from local server endpoint
     fetch(`/api/products/${encodeURIComponent(id)}`, {
       method: 'DELETE'
-    }).catch((err) => console.error('Failed to delete product on server:', err));
+    }).catch(() => {});
   };
 
   const updateStock = (id: string, newStock: number) => {
