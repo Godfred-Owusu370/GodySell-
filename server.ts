@@ -190,6 +190,17 @@ app.delete('/api/products/:id', (req: Request, res: Response) => {
 async function startServer() {
   const isProd = process.env.NODE_ENV === 'production';
 
+  // Explicit SEO static assets
+  app.get('/robots.txt', (req: Request, res: Response) => {
+    const robotsPath = path.resolve(__dirname, isProd ? 'dist/robots.txt' : 'public/robots.txt');
+    res.type('text/plain').sendFile(robotsPath);
+  });
+
+  app.get('/sitemap.xml', (req: Request, res: Response) => {
+    const sitemapPath = path.resolve(__dirname, isProd ? 'dist/sitemap.xml' : 'public/sitemap.xml');
+    res.type('application/xml').sendFile(sitemapPath);
+  });
+
   if (!isProd) {
     const vite = await createViteServer({
       server: { middlewareMode: true },
