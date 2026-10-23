@@ -12,7 +12,7 @@ interface GoogleAccountItem {
 }
 
 export const GoogleLoginWall: React.FC = () => {
-  const { loginWithGoogle } = useApp();
+  const { loginWithGoogle, setActiveView } = useApp();
 
   const [isChooserOpen, setIsChooserOpen] = useState(false);
   const [showAddNewAccount, setShowAddNewAccount] = useState(false);
@@ -158,6 +158,36 @@ export const GoogleLoginWall: React.FC = () => {
           <ShieldCheck className="w-3.5 h-3.5 text-emerald-700" />
           <span>Encrypted authentication</span>
         </div>
+      </div>
+
+      {/* About & Founder info for guests & crawlers */}
+      <div className="mt-6 text-center text-xs text-slate-500 space-x-3">
+        <a
+          href="/about"
+          onClick={(e) => {
+            e.preventDefault();
+            setActiveView('about');
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }}
+          className="hover:text-slate-800 underline underline-offset-2 transition-colors font-medium"
+        >
+          About Godysell
+        </a>
+        <span>•</span>
+        <span>
+          Founded by{' '}
+          <a
+            href="/about"
+            onClick={(e) => {
+              e.preventDefault();
+              setActiveView('about');
+              window.scrollTo({ top: 0, behavior: 'smooth' });
+            }}
+            className="text-emerald-700 hover:text-emerald-800 font-semibold underline underline-offset-2 transition-colors"
+          >
+            Godfred Owusu
+          </a>
+        </span>
       </div>
 
       {/* GOOGLE SIGN IN / ACCOUNT CHOOSER MODAL */}

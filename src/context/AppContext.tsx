@@ -509,8 +509,35 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return INITIAL_ANNOUNCEMENT;
   });
 
-  // Navigation & View States
-  const [activeView, setActiveView] = useState<ViewMode>('marketplace');
+  // Navigation & View States (supporting /about direct URL routing)
+  const [activeView, setActiveViewState] = useState<ViewMode>(() => {
+    if (typeof window !== 'undefined' && window.location.pathname.toLowerCase().startsWith('/about')) {
+      return 'about';
+    }
+    return 'marketplace';
+  });
+
+  const setActiveView = (view: ViewMode) => {
+    setActiveViewState(view);
+    if (typeof window !== 'undefined') {
+      const targetPath = view === 'about' ? '/about' : '/';
+      if (window.location.pathname !== targetPath) {
+        window.history.pushState({}, '', targetPath);
+      }
+    }
+  };
+
+  useEffect(() => {
+    const handlePopState = () => {
+      if (window.location.pathname.toLowerCase().startsWith('/about')) {
+        setActiveViewState('about');
+      } else {
+        setActiveViewState((prev) => (prev === 'about' ? 'marketplace' : prev));
+      }
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
   const [deviceMode, setDeviceMode] = useState<DeviceMode>('desktop');
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [selectedRegion, setSelectedRegion] = useState<string | null>(null);

@@ -15,9 +15,20 @@ export const Footer: React.FC = () => {
             <div className="inline-block">
               <GodySellLogo size="md" showSubtitle inverted />
             </div>
-            <p className="text-slate-400 leading-relaxed text-[11px] mt-2">
-              Ghana&apos;s trusted marketplace for buying and selling vehicles, phones, real estate, electronics, and essentials with verified seller contacts.
-            </p>
+            <div className="pt-2">
+              <a
+                href="/about"
+                onClick={(e) => {
+                  e.preventDefault();
+                  setActiveView('about');
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }}
+                className="inline-flex items-center gap-1.5 text-emerald-400 hover:text-emerald-300 font-semibold transition-colors text-xs"
+              >
+                <span>About Godysell</span>
+                <span>→</span>
+              </a>
+            </div>
           </div>
 
           {/* Popular Regions */}
@@ -158,10 +169,38 @@ export const Footer: React.FC = () => {
 
         {/* Bottom row */}
         <div className="pt-6 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
-          <p className="text-slate-400 text-center sm:text-left">
-            © {new Date().getFullYear()} GodySell Ghana. All rights reserved.
-          </p>
-          <div className="flex items-center gap-3 text-slate-400">
+          <div className="space-y-1 text-center sm:text-left">
+            <p className="text-slate-400">
+              © {new Date().getFullYear()} GodySell Ghana. All rights reserved.
+            </p>
+            <p className="text-slate-400 text-xs">
+              Founded by{' '}
+              <a
+                href="/about"
+                onClick={(e) => {
+                  e.preventDefault();
+                  setActiveView('about');
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }}
+                className="text-emerald-400 hover:text-emerald-300 font-semibold underline underline-offset-2 transition-colors"
+              >
+                Godfred Owusu
+              </a>
+            </p>
+          </div>
+          <div className="flex items-center gap-4 text-slate-400">
+            <a
+              href="/about"
+              onClick={(e) => {
+                e.preventDefault();
+                setActiveView('about');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              className="hover:text-white transition-colors"
+            >
+              About
+            </a>
+            <span>•</span>
             <span>Safety Guidelines</span>
           </div>
         </div>

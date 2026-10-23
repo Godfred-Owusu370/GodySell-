@@ -133,6 +133,16 @@ export const Header: React.FC = () => {
                 </span>
               )}
             </button>
+            <button
+              onClick={() => setActiveView('about')}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors ${
+                activeView === 'about'
+                  ? 'bg-white text-slate-900 shadow-2xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              About
+            </button>
           </div>
 
           {/* Saved Ads Bookmark Button */}

@@ -133,5 +133,5 @@ export interface UserProfile {
   memberSince?: string;
 }
 
-export type ViewMode = 'marketplace' | 'management' | 'chats';
+export type ViewMode = 'marketplace' | 'management' | 'chats' | 'about';
 export type DeviceMode = 'desktop' | 'mobile';

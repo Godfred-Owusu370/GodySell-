@@ -38,27 +38,54 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Cabinet+Grotesk:wght@700;800;900&display=swap" rel="stylesheet" />
 
-    <!-- WebSite JSON-LD Schema -->
+    <!-- Structured Data (Schema.org @graph) -->
     <script type="application/ld+json">
     {
       "@context": "https://schema.org",
-      "@type": "WebSite",
-      "name": "Godysell",
-      "alternateName": [
-        "GodySell",
-        "GodySell Ghana",
-        "Godysell Ghana"
-      ],
-      "url": "https://www.godysell.store/",
-      "description": "Buy and sell verified products across Ghana with real-time seller inventory and buyer connections.",
-      "potentialAction": {
-        "@type": "SearchAction",
-        "target": {
-          "@type": "EntryPoint",
-          "urlTemplate": "https://www.godysell.store/?search={search_term_string}"
+      "@graph": [
+        {
+          "@type": "Organization",
+          "@id": "https://www.godysell.store/#organization",
+          "name": "Godysell",
+          "alternateName": [
+            "GodySell",
+            "Godysell Ghana"
+          ],
+          "url": "https://www.godysell.store/",
+          "logo": "https://www.godysell.store/godysell_logo.png",
+          "description": "Godysell is a Ghanaian online marketplace for buying and selling products.",
+          "founder": {
+            "@type": "Person",
+            "@id": "https://www.godysell.store/about#godfred-owusu"
+          }
         },
-        "query-input": "required name=search_term_string"
-      }
+        {
+          "@type": "Person",
+          "@id": "https://www.godysell.store/about#godfred-owusu",
+          "name": "Godfred Owusu",
+          "jobTitle": "Founder",
+          "url": "https://www.godysell.store/about",
+          "worksFor": {
+            "@type": "Organization",
+            "@id": "https://www.godysell.store/#organization",
+            "name": "Godysell"
+          },
+          "sameAs": [
+            "https://www.linkedin.com/in/godfred-owusu-6196543a3",
+            "https://www.instagram.com/godfred_870",
+            "https://www.tiktok.com/@owusu.godfred870"
+          ]
+        },
+        {
+          "@type": "WebSite",
+          "@id": "https://www.godysell.store/#website",
+          "name": "Godysell",
+          "url": "https://www.godysell.store/",
+          "publisher": {
+            "@id": "https://www.godysell.store/#organization"
+          }
+        }
+      ]
     }
     </script>
   </head>
