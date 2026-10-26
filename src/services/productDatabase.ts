@@ -39,10 +39,46 @@ async function fetchWithTimeout(url: string, options: RequestInit = {}): Promise
 }
 
 /**
+ * Filter out any mock, test, demo, or placeholder products so only genuine user listings appear
+ */
+export function filterGenuineProducts(products: any[]): Product[] {
+  if (!Array.isArray(products)) return [];
+  return products.filter((p) => {
+    if (!p) return false;
+    const id = String(p.id || '');
+    const title = String(p.title || '').trim().toLowerCase();
+    if (id.startsWith('prod-test-') || id.startsWith('prod-00') || id.startsWith('prod-test')) {
+      return false;
+    }
+    if (title.startsWith('test product') || title === 'sample product' || title.includes('sample listing')) {
+      return false;
+    }
+    return true;
+  });
+}
+
+/**
  * Fetch all shared products from the online persistent cloud database
  */
 export async function fetchOnlineProducts(): Promise<Product[]> {
-  // 1. Try Primary Cloud Database
+  // 1. Try Local / Vercel API endpoint (fastest, same-origin)
+  if (typeof window !== 'undefined') {
+    try {
+      const localRes = await fetchWithTimeout('/api/products');
+      if (localRes.ok) {
+        const localProducts = await localRes.json();
+        if (Array.isArray(localProducts)) {
+          const genuine = filterGenuineProducts(localProducts);
+          setLocalItem(LOCAL_STORAGE_KEY, JSON.stringify(genuine));
+          return genuine;
+        }
+      }
+    } catch {
+      // Fallback
+    }
+  }
+
+  // 2. Try Primary Cloud Database
   try {
     const res = await fetchWithTimeout(PRIMARY_CLOUD_DB_URL, {
       method: 'GET',
@@ -51,21 +87,21 @@ export async function fetchOnlineProducts(): Promise<Product[]> {
 
     if (res.ok) {
       const result = await res.json();
-      const products: Product[] = Array.isArray(result?.products)
+      const rawProducts: Product[] = Array.isArray(result?.products)
         ? result.products
         : Array.isArray(result?.data?.products)
         ? result.data.products
         : [];
 
-      // Update local storage cache
-      setLocalItem(LOCAL_STORAGE_KEY, JSON.stringify(products));
-      return products;
+      const genuine = filterGenuineProducts(rawProducts);
+      setLocalItem(LOCAL_STORAGE_KEY, JSON.stringify(genuine));
+      return genuine;
     }
   } catch (err) {
     console.warn('Primary cloud DB fetch failed, attempting backup endpoint:', err);
   }
 
-  // 2. Try Secondary / Backup Cloud Database
+  // 3. Try Secondary / Backup Cloud Database
   try {
     const res = await fetchWithTimeout(BACKUP_CLOUD_DB_URL, {
       method: 'GET',
@@ -74,35 +110,18 @@ export async function fetchOnlineProducts(): Promise<Product[]> {
 
     if (res.ok) {
       const result = await res.json();
-      const products: Product[] = Array.isArray(result?.products)
+      const rawProducts: Product[] = Array.isArray(result?.products)
         ? result.products
         : Array.isArray(result?.data?.products)
         ? result.data.products
         : [];
 
-      if (products.length > 0) {
-        setLocalItem(LOCAL_STORAGE_KEY, JSON.stringify(products));
-        return products;
-      }
+      const genuine = filterGenuineProducts(rawProducts);
+      setLocalItem(LOCAL_STORAGE_KEY, JSON.stringify(genuine));
+      return genuine;
     }
   } catch (err) {
     console.warn('Backup cloud DB fetch failed:', err);
-  }
-
-  // 3. Try Local / Vercel API endpoint
-  if (typeof window !== 'undefined') {
-    try {
-      const localRes = await fetchWithTimeout('/api/products');
-      if (localRes.ok) {
-        const localProducts = await localRes.json();
-        if (Array.isArray(localProducts) && localProducts.length > 0) {
-          setLocalItem(LOCAL_STORAGE_KEY, JSON.stringify(localProducts));
-          return localProducts;
-        }
-      }
-    } catch {
-      // Ignore
-    }
   }
 
   // 4. Fallback to LocalStorage cache
@@ -111,7 +130,7 @@ export async function fetchOnlineProducts(): Promise<Product[]> {
     try {
       const parsed = JSON.parse(cached);
       if (Array.isArray(parsed)) {
-        return parsed;
+        return filterGenuineProducts(parsed);
       }
     } catch (e) {
       console.error('Failed to parse cached products', e);

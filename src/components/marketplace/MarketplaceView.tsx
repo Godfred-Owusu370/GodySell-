@@ -252,10 +252,10 @@ export const MarketplaceView: React.FC = () => {
               </div>
               <div className="max-w-md mx-auto space-y-1.5">
                 <h3 className="text-base font-bold text-slate-900">
-                  No active listings yet
+                  No products available yet
                 </h3>
                 <p className="text-xs text-slate-500 leading-relaxed">
-                  Be the first seller to post an item on GodySell Ghana. Listings are free and appear immediately to buyers nationwide.
+                  Be the first to list a product! Listings on GodySell Ghana are free and appear immediately to buyers nationwide.
                 </p>
                 {syncError && (
                   <p className="text-xs text-rose-600 font-medium">
@@ -270,14 +270,14 @@ export const MarketplaceView: React.FC = () => {
                   className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg transition-colors inline-flex items-center gap-1.5"
                 >
                   <RefreshCw className="w-3.5 h-3.5" />
-                  <span>Retry Sync</span>
+                  <span>Refresh</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => openCreateProductModal()}
                   className="px-4 py-2 bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-semibold rounded-lg transition-colors shadow-2xs inline-flex items-center gap-1.5"
                 >
-                  <span>+ Post Your Ad</span>
+                  <span>+ List a Product</span>
                 </button>
               </div>
             </div>

@@ -196,27 +196,42 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     'prod-001', 'prod-002', 'prod-003', 'prod-004', 'prod-005', 'prod-006', 'prod-007', 'prod-008'
   ]);
 
-  // Products - initialized from shared cloud cache or initial state
+  const isDemoOrTestProduct = (p: any): boolean => {
+    if (!p) return true;
+    const id = String(p.id || '');
+    const title = String(p.title || '').trim().toLowerCase();
+    if (id.startsWith('prod-test-') || id.startsWith('prod-00') || DEFAULT_PRODUCT_IDS.has(id)) {
+      return true;
+    }
+    if (title.startsWith('test product') || title === 'sample product' || title.includes('sample listing')) {
+      return true;
+    }
+    return false;
+  };
+
+  // Products - initialized from shared cloud cache or initial state (genuine user products only)
   const [products, setProducts] = useState<Product[]>(() => {
     try {
       const cached = localStorage.getItem('godysell_shared_products_cache');
       if (cached) {
         const parsed: Product[] = JSON.parse(cached);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed;
+        if (Array.isArray(parsed)) {
+          const genuine = parsed.filter((p) => !isDemoOrTestProduct(p));
+          if (genuine.length > 0) return genuine;
         }
       }
       const saved = localStorage.getItem('jiji_gh_products');
       if (saved) {
         const parsed: Product[] = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed;
+        if (Array.isArray(parsed)) {
+          const genuine = parsed.filter((p) => !isDemoOrTestProduct(p));
+          if (genuine.length > 0) return genuine;
         }
       }
     } catch (e) {
       console.error(e);
     }
-    return INITIAL_PRODUCTS;
+    return INITIAL_PRODUCTS.filter((p) => !isDemoOrTestProduct(p));
   });
 
   // Orders
@@ -563,7 +578,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       const live = await fetchOnlineProducts();
       if (Array.isArray(live)) {
-        setProducts(live);
+        const genuine = live.filter((p) => !isDemoOrTestProduct(p));
+        setProducts(genuine);
       }
     } catch (err: any) {
       setSyncError(err?.message || 'Failed to refresh listings');
@@ -575,7 +591,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Sync to local storage
   useEffect(() => {
     try {
-      localStorage.setItem('jiji_gh_products', JSON.stringify(products));
+      const genuine = products.filter((p) => !isDemoOrTestProduct(p));
+      localStorage.setItem('jiji_gh_products', JSON.stringify(genuine));
+      localStorage.setItem('godysell_shared_products_cache', JSON.stringify(genuine));
     } catch (e) {
       console.error(e);
     }
@@ -591,10 +609,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setIsSyncing(true);
         const liveProducts = await fetchOnlineProducts();
         if (isMounted && Array.isArray(liveProducts)) {
+          const genuine = liveProducts.filter((p) => !isDemoOrTestProduct(p));
           setProducts((current) => {
             // Only update state if products changed to prevent unnecessary re-renders
-            if (JSON.stringify(current) !== JSON.stringify(liveProducts)) {
-              return liveProducts;
+            if (JSON.stringify(current) !== JSON.stringify(genuine)) {
+              return genuine;
             }
             return current;
           });

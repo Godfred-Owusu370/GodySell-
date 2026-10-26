@@ -3,12 +3,22 @@
 const PRIMARY_CLOUD_DB_URL = 'https://extendsclass.com/api/json-storage/bin/abfaaea';
 const BACKUP_CLOUD_DB_URL = 'https://extendsclass.com/api/json-storage/bin/adabcaa';
 
+function isRealProduct(p: any): boolean {
+  if (!p) return false;
+  const id = String(p.id || '');
+  const title = String(p.title || '').trim().toLowerCase();
+  if (id.startsWith('prod-test-') || id.startsWith('prod-00') || id.includes('test')) return false;
+  if (title.startsWith('test product') || title === 'sample product' || title.includes('sample listing')) return false;
+  return true;
+}
+
 async function fetchFromCloud() {
   try {
     const res = await fetch(PRIMARY_CLOUD_DB_URL);
     if (res.ok) {
       const data = await res.json();
-      return Array.isArray(data?.products) ? data.products : [];
+      const list = Array.isArray(data?.products) ? data.products : [];
+      return list.filter(isRealProduct);
     }
   } catch (e) {
     console.warn('Vercel API: Primary fetch failed:', e);
@@ -18,7 +28,8 @@ async function fetchFromCloud() {
     const res = await fetch(BACKUP_CLOUD_DB_URL);
     if (res.ok) {
       const data = await res.json();
-      return Array.isArray(data?.products) ? data.products : [];
+      const list = Array.isArray(data?.products) ? data.products : [];
+      return list.filter(isRealProduct);
     }
   } catch (e) {
     console.warn('Vercel API: Backup fetch failed:', e);
