@@ -1,9 +1,11 @@
 import { Product } from '../types';
 
-// Dedicated Shared Persistent Online Cloud Database for GodySell Marketplace
-// Synchronizes all published products in real-time across all devices, accounts, and Vercel deployments
-const CLOUD_DB_URL = 'https://extendsclass.com/api/json-storage/bin/abfaaea';
+// Dual-Cloud Resilient Central Database Adapter for GodySell Ghana Marketplace
+// Synchronizes all published listings across all accounts, devices, and Vercel deployments
+export const PRIMARY_CLOUD_DB_URL = 'https://extendsclass.com/api/json-storage/bin/abfaaea';
+export const BACKUP_CLOUD_DB_URL = 'https://extendsclass.com/api/json-storage/bin/adabcaa';
 const LOCAL_STORAGE_KEY = 'godysell_shared_products_cache';
+const FETCH_TIMEOUT_MS = 7000;
 
 function getLocalItem(key: string): string | null {
   try {
@@ -22,20 +24,29 @@ function setLocalItem(key: string, value: string): void {
   } catch {}
 }
 
-export interface CloudCatalogPayload {
-  products: Product[];
+/**
+ * Perform a fetch with a strict timeout to prevent hung requests
+ */
+async function fetchWithTimeout(url: string, options: RequestInit = {}): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, { ...options, signal: controller.signal });
+    return res;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 /**
  * Fetch all shared products from the online persistent cloud database
  */
 export async function fetchOnlineProducts(): Promise<Product[]> {
+  // 1. Try Primary Cloud Database
   try {
-    const res = await fetch(CLOUD_DB_URL, {
+    const res = await fetchWithTimeout(PRIMARY_CLOUD_DB_URL, {
       method: 'GET',
-      headers: {
-        'Accept': 'application/json'
-      }
+      headers: { 'Accept': 'application/json' }
     });
 
     if (res.ok) {
@@ -45,35 +56,63 @@ export async function fetchOnlineProducts(): Promise<Product[]> {
         : Array.isArray(result?.data?.products)
         ? result.data.products
         : [];
-      
-      // Update local cache for instant offline fallback
+
+      // Update local storage cache
       setLocalItem(LOCAL_STORAGE_KEY, JSON.stringify(products));
       return products;
     }
   } catch (err) {
-    console.warn('Direct cloud DB fetch error, falling back to cache:', err);
+    console.warn('Primary cloud DB fetch failed, attempting backup endpoint:', err);
   }
 
-  // Backup 1: Local server endpoint if running with Express in browser
+  // 2. Try Secondary / Backup Cloud Database
+  try {
+    const res = await fetchWithTimeout(BACKUP_CLOUD_DB_URL, {
+      method: 'GET',
+      headers: { 'Accept': 'application/json' }
+    });
+
+    if (res.ok) {
+      const result = await res.json();
+      const products: Product[] = Array.isArray(result?.products)
+        ? result.products
+        : Array.isArray(result?.data?.products)
+        ? result.data.products
+        : [];
+
+      if (products.length > 0) {
+        setLocalItem(LOCAL_STORAGE_KEY, JSON.stringify(products));
+        return products;
+      }
+    }
+  } catch (err) {
+    console.warn('Backup cloud DB fetch failed:', err);
+  }
+
+  // 3. Try Local / Vercel API endpoint
   if (typeof window !== 'undefined') {
     try {
-      const localRes = await fetch('/api/products');
+      const localRes = await fetchWithTimeout('/api/products');
       if (localRes.ok) {
         const localProducts = await localRes.json();
-        if (Array.isArray(localProducts)) {
+        if (Array.isArray(localProducts) && localProducts.length > 0) {
+          setLocalItem(LOCAL_STORAGE_KEY, JSON.stringify(localProducts));
           return localProducts;
         }
       }
     } catch {
-      // Ignore if offline
+      // Ignore
     }
   }
 
-  // Backup 2: LocalStorage cache
+  // 4. Fallback to LocalStorage cache
   const cached = getLocalItem(LOCAL_STORAGE_KEY);
   if (cached) {
     try {
-      return JSON.parse(cached);
+      const parsed = JSON.parse(cached);
+      if (Array.isArray(parsed)) {
+        return parsed;
+      }
     } catch (e) {
       console.error('Failed to parse cached products', e);
     }
@@ -89,39 +128,58 @@ export async function syncCatalogToCloud(products: Product[]): Promise<boolean> 
   // Update cache immediately
   setLocalItem(LOCAL_STORAGE_KEY, JSON.stringify(products));
 
-  // Sync to Online Persistent Database
-  try {
-    const payload: CloudCatalogPayload = {
-      products
-    };
+  const payload = JSON.stringify({ products });
+  let savedSuccessfully = false;
+  let lastError = '';
 
-    const res = await fetch(CLOUD_DB_URL, {
+  // 1. Sync to Primary Cloud Database
+  try {
+    const res = await fetchWithTimeout(PRIMARY_CLOUD_DB_URL, {
       method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(payload)
+      headers: { 'Content-Type': 'application/json' },
+      body: payload
     });
 
     if (res.ok) {
-      // Also sync to local /api/products if in browser
-      if (typeof window !== 'undefined') {
-        fetch('/api/products/sync-all', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(products)
-        }).catch(() => {});
-      }
-      return true;
+      savedSuccessfully = true;
     } else {
-      const errText = await res.text();
-      console.error('Cloud DB PUT failed:', res.status, errText);
+      lastError = `Primary HTTP ${res.status}: ${await res.text().catch(() => '')}`;
+      console.warn('Primary cloud DB save warning:', lastError);
     }
-  } catch (err) {
-    console.error('Failed to sync catalog to cloud database:', err);
+  } catch (err: any) {
+    lastError = err?.message || 'Network error on primary';
+    console.warn('Primary cloud DB error:', lastError);
   }
 
-  return false;
+  // 2. Sync to Backup Cloud Database (for redundancy or if primary failed)
+  try {
+    const backupRes = await fetchWithTimeout(BACKUP_CLOUD_DB_URL, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: payload
+    });
+
+    if (backupRes.ok) {
+      savedSuccessfully = true;
+    }
+  } catch (backupErr) {
+    console.warn('Backup cloud DB sync warning:', backupErr);
+  }
+
+  // 3. Also notify /api/products/sync-all in local development
+  if (typeof window !== 'undefined') {
+    fetch('/api/products/sync-all', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: payload
+    }).catch(() => {});
+  }
+
+  if (!savedSuccessfully) {
+    throw new Error(`Failed to save product to central database: ${lastError || 'Network timeout'}`);
+  }
+
+  return true;
 }
 
 /**

@@ -56,6 +56,9 @@ interface AppContextType {
   isChatModalOpen: boolean;
   chatProduct: Product | null;
   editingProduct: Product | null;
+  isSyncing: boolean;
+  syncError: string | null;
+  refreshProducts: () => Promise<void>;
   
   // Actions
   setSearchQuery: (q: string) => void;
@@ -65,9 +68,9 @@ interface AppContextType {
   toggleFavorite: (productId: string) => void;
   setActiveView: (view: ViewMode) => void;
   setDeviceMode: (mode: DeviceMode) => void;
-  addProduct: (product: Omit<Product, 'id' | 'views' | 'inquiries' | 'salesCount' | 'createdAt'>) => void;
-  updateProduct: (id: string, updates: Partial<Product>) => void;
-  deleteProduct: (id: string) => void;
+  addProduct: (product: Omit<Product, 'id' | 'views' | 'inquiries' | 'salesCount' | 'createdAt'>) => Promise<boolean>;
+  updateProduct: (id: string, updates: Partial<Product>) => Promise<boolean>;
+  deleteProduct: (id: string) => Promise<boolean>;
   updateStock: (id: string, newStock: number) => void;
   incrementStock: (id: string, delta: number) => void;
   toggleProductStatus: (id: string) => void;
@@ -551,6 +554,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [isChatModalOpen, setIsChatModalOpen] = useState(false);
   const [chatProduct, setChatProduct] = useState<Product | null>(null);
 
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
+
+  const refreshProducts = async () => {
+    setIsSyncing(true);
+    setSyncError(null);
+    try {
+      const live = await fetchOnlineProducts();
+      if (Array.isArray(live)) {
+        setProducts(live);
+      }
+    } catch (err: any) {
+      setSyncError(err?.message || 'Failed to refresh listings');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   // Sync to local storage
   useEffect(() => {
     try {
@@ -567,6 +588,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const syncProducts = async () => {
       try {
+        setIsSyncing(true);
         const liveProducts = await fetchOnlineProducts();
         if (isMounted && Array.isArray(liveProducts)) {
           setProducts((current) => {
@@ -576,9 +598,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             }
             return current;
           });
+          setSyncError(null);
         }
-      } catch (err) {
+      } catch (err: any) {
         console.warn('Sync failed:', err);
+        if (isMounted) {
+          setSyncError(err?.message || 'Failed to sync with cloud catalog');
+        }
+      } finally {
+        if (isMounted) {
+          setIsSyncing(false);
+        }
       }
     };
 
@@ -675,11 +705,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return prod.sellerEmail.trim().toLowerCase() === normalized;
   };
 
-  const addProduct = (productData: Omit<Product, 'id' | 'views' | 'inquiries' | 'salesCount' | 'createdAt'>) => {
+  const addProduct = async (productData: Omit<Product, 'id' | 'views' | 'inquiries' | 'salesCount' | 'createdAt'>): Promise<boolean> => {
     const finalSellerEmail = user?.email?.trim().toLowerCase() || 'vendor@godysell.com';
     const newProduct: Product = {
       ...productData,
-      id: `prod-${Date.now().toString().slice(-6)}`,
+      id: `prod-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`,
       sellerEmail: finalSellerEmail,
       sellerName: productData.sellerName || user?.name || 'Seller',
       sellerPhone: productData.sellerPhone || user?.phone || '+233(0)592836664',
@@ -689,26 +719,38 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       createdAt: new Date().toISOString()
     };
 
-    // 1. Optimistic update in state
-    setProducts((prev) => [newProduct, ...prev.filter(p => p.id !== newProduct.id)]);
+    // 1. Optimistic update in state so it appears immediately
+    setProducts((prev) => [newProduct, ...prev.filter((p) => p.id !== newProduct.id)]);
 
-    // 2. Persist to shared online cloud database so it appears on all phones and accounts
-    publishProductToCloud(newProduct).catch((err) => console.error('Cloud publish error:', err));
+    try {
+      // 2. Persist to shared online cloud database
+      await publishProductToCloud(newProduct);
 
-    // 3. Also post to local /api/products if local server is running
-    fetch('/api/products', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(newProduct)
-    }).catch(() => {});
+      // 3. Also post to local /api/products if local server is running
+      if (typeof window !== 'undefined') {
+        fetch('/api/products', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(newProduct)
+        }).catch(() => {});
+      }
+
+      return true;
+    } catch (err: any) {
+      console.error('Failed to save product to central database:', err);
+      // Revert optimistic update
+      setProducts((prev) => prev.filter((p) => p.id !== newProduct.id));
+      throw err;
+    }
   };
 
-  const updateProduct = (id: string, updates: Partial<Product>) => {
+  const updateProduct = async (id: string, updates: Partial<Product>): Promise<boolean> => {
     // Only the owner can edit their published product
     if (!isProductOwner(id)) {
-      console.warn('Unauthorized: Cannot edit someone else\'s product.');
-      return;
+      console.warn("Unauthorized: Cannot edit someone else's product.");
+      return false;
     }
+    const previous = products;
     setProducts((prev) =>
       prev.map((p) => (p.id === id ? { ...p, ...updates } : p))
     );
@@ -716,23 +758,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setSelectedProduct((prev) => (prev ? { ...prev, ...updates } : null));
     }
 
-    // Persist to shared online cloud database
-    updateProductInCloud(id, updates).catch((err) => console.error('Cloud update error:', err));
-
-    // Also update local server endpoint
-    fetch(`/api/products/${encodeURIComponent(id)}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(updates)
-    }).catch(() => {});
+    try {
+      await updateProductInCloud(id, updates);
+      if (typeof window !== 'undefined') {
+        fetch(`/api/products/${encodeURIComponent(id)}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(updates)
+        }).catch(() => {});
+      }
+      return true;
+    } catch (err) {
+      console.error('Failed to update product in cloud database:', err);
+      setProducts(previous);
+      throw err;
+    }
   };
 
-  const deleteProduct = (id: string) => {
+  const deleteProduct = async (id: string): Promise<boolean> => {
     // Only the owner can delete their published product
     if (!isProductOwner(id)) {
-      console.warn('Unauthorized: Cannot delete someone else\'s product.');
-      return;
+      console.warn("Unauthorized: Cannot delete someone else's product.");
+      return false;
     }
+    const previous = products;
     setProducts((prev) => {
       const updated = prev.filter((p) => p.id !== id);
       try {
@@ -746,13 +795,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       setSelectedProduct(null);
     }
 
-    // Persist deletion to shared online cloud database
-    deleteProductFromCloud(id).catch((err) => console.error('Cloud delete error:', err));
-
-    // Also delete from local server endpoint
-    fetch(`/api/products/${encodeURIComponent(id)}`, {
-      method: 'DELETE'
-    }).catch(() => {});
+    try {
+      await deleteProductFromCloud(id);
+      if (typeof window !== 'undefined') {
+        fetch(`/api/products/${encodeURIComponent(id)}`, {
+          method: 'DELETE'
+        }).catch(() => {});
+      }
+      return true;
+    } catch (err) {
+      console.error('Failed to delete product in cloud database:', err);
+      setProducts(previous);
+      throw err;
+    }
   };
 
   const updateStock = (id: string, newStock: number) => {
@@ -970,6 +1025,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         isChatModalOpen,
         chatProduct,
         editingProduct,
+        isSyncing,
+        syncError,
+        refreshProducts,
         setSearchQuery,
         setSelectedCategory,
         setSelectedRegion,

@@ -6,7 +6,9 @@ import {
   SlidersHorizontal,
   Package,
   Bookmark,
-  ArrowRight
+  ArrowRight,
+  RefreshCw,
+  Loader2
 } from 'lucide-react';
 import { GHANA_REGIONS } from '../../data/initialProducts';
 
@@ -22,7 +24,10 @@ export const MarketplaceView: React.FC = () => {
     setActiveView,
     favorites,
     showOnlySaved,
-    setShowOnlySaved
+    setShowOnlySaved,
+    isSyncing,
+    refreshProducts,
+    syncError
   } = useApp();
 
   const [conditionFilter, setConditionFilter] = useState<string>('all');
@@ -200,12 +205,24 @@ export const MarketplaceView: React.FC = () => {
         {/* Product Grid */}
         <div className="space-y-4">
           <div className="flex items-center justify-between text-xs text-slate-600">
-            <span className="font-bold text-slate-900 text-sm">
-              {selectedCategory || 'Recent Listings'}
-              <span className="ml-2 font-normal text-slate-400 text-xs">
-                ({sortedProducts.length} items)
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-slate-900 text-sm">
+                {selectedCategory || 'Recent Listings'}
+                <span className="ml-2 font-normal text-slate-400 text-xs">
+                  ({sortedProducts.length} items)
+                </span>
               </span>
-            </span>
+
+              <button
+                type="button"
+                onClick={() => refreshProducts()}
+                disabled={isSyncing}
+                title="Refresh product listings"
+                className="p-1 text-slate-400 hover:text-emerald-800 rounded transition-colors disabled:opacity-50"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin text-emerald-800' : ''}`} />
+              </button>
+            </div>
 
             {selectedRegion && (
               <span className="text-slate-500 text-xs">
@@ -214,7 +231,21 @@ export const MarketplaceView: React.FC = () => {
             )}
           </div>
 
-          {products.length === 0 ? (
+          {products.length === 0 && isSyncing ? (
+            /* Skeleton loader while fetching from central database */
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
+              {[1, 2, 3, 4].map((i) => (
+                <div key={i} className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-2xs animate-pulse">
+                  <div className="aspect-square bg-slate-200" />
+                  <div className="p-3 space-y-2">
+                    <div className="h-3.5 bg-slate-200 rounded-md w-3/4" />
+                    <div className="h-4 bg-slate-200 rounded-md w-1/2" />
+                    <div className="h-3 bg-slate-100 rounded-md w-2/3" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : products.length === 0 ? (
             <div className="bg-white rounded-xl border border-slate-200 p-8 sm:p-12 text-center space-y-4 shadow-2xs">
               <div className="w-12 h-12 rounded-xl bg-slate-100 text-slate-600 mx-auto flex items-center justify-center">
                 <Package className="w-6 h-6 text-slate-500" />
@@ -226,8 +257,21 @@ export const MarketplaceView: React.FC = () => {
                 <p className="text-xs text-slate-500 leading-relaxed">
                   Be the first seller to post an item on GodySell Ghana. Listings are free and appear immediately to buyers nationwide.
                 </p>
+                {syncError && (
+                  <p className="text-xs text-rose-600 font-medium">
+                    {syncError}
+                  </p>
+                )}
               </div>
-              <div className="pt-2">
+              <div className="pt-2 flex items-center justify-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => refreshProducts()}
+                  className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg transition-colors inline-flex items-center gap-1.5"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" />
+                  <span>Retry Sync</span>
+                </button>
                 <button
                   type="button"
                   onClick={() => openCreateProductModal()}

@@ -7,10 +7,13 @@ import {
   Trash2,
   CheckCircle2,
   Phone,
-  Store
+  Store,
+  Loader2,
+  AlertCircle
 } from 'lucide-react';
 import { ProductCategory, ProductCondition, RegionGhana } from '../../types';
 import { GHANA_REGIONS, CATEGORIES_WITH_META } from '../../data/initialProducts';
+import { compressImageFile } from '../../utils/imageCompressor';
 
 export const ProductFormModal: React.FC = () => {
   const {
@@ -42,6 +45,10 @@ export const ProductFormModal: React.FC = () => {
     { key: 'Condition', value: 'Brand New' }
   ]);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [isCompressingImage, setIsCompressingImage] = useState(false);
+  const [imageNotice, setImageNotice] = useState<string | null>(null);
 
   // Sync when editingProduct changes
   useEffect(() => {
@@ -63,7 +70,7 @@ export const ProductFormModal: React.FC = () => {
       setSpecs(
         Object.entries(editingProduct.specifications || {}).map(([key, value]) => ({
           key,
-          value
+          value: String(value || '')
         }))
       );
     } else {
@@ -88,20 +95,35 @@ export const ProductFormModal: React.FC = () => {
 
   if (!isCreateProductModalOpen) return null;
 
-  // Handle image upload from computer / phone camera
-  const handleImageFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Handle image upload from computer / phone camera with automatic client-side compression
+  const handleImageFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
-    Array.from(files).forEach((file) => {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        if (event.target?.result) {
-          setImages((prev) => [...prev, event.target!.result as string]);
-        }
-      };
-      reader.readAsDataURL(file);
-    });
+    setIsCompressingImage(true);
+    setImageNotice(null);
+    setSaveError(null);
+
+    try {
+      const compressedList: string[] = [];
+      for (const file of Array.from(files)) {
+        const compressed = await compressImageFile(file, {
+          maxWidth: 900,
+          maxHeight: 900,
+          quality: 0.75
+        });
+        compressedList.push(compressed);
+      }
+      setImages((prev) => [...prev, ...compressedList].slice(0, 5));
+      setImageNotice('Images optimized for cross-device loading.');
+      setTimeout(() => setImageNotice(null), 3000);
+    } catch (err: any) {
+      console.error('Image compression error:', err);
+      setSaveError('Failed to process image. Please try a different photo.');
+    } finally {
+      setIsCompressingImage(false);
+      e.target.value = '';
+    }
   };
 
   const handleAddSpec = () => {
@@ -118,9 +140,15 @@ export const ProductFormModal: React.FC = () => {
     );
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!title || !price) return;
+    if (!title.trim() || !price) {
+      setSaveError('Please provide a product title and price.');
+      return;
+    }
+
+    setIsSaving(true);
+    setSaveError(null);
 
     const specsObj: Record<string, string> = {};
     specs.forEach((s) => {
@@ -134,17 +162,17 @@ export const ProductFormModal: React.FC = () => {
     const finalSellerName = sellerName.trim() || user?.name || 'My GodySell Shop Ghana';
 
     const payload = {
-      title,
+      title: title.trim(),
       price: parseFloat(price) || 0,
       category,
       subcategory,
       region,
-      city,
+      city: city.trim() || 'Accra',
       condition,
       stock: parsedStock,
       sku: sku || `SKU-${Date.now().toString().slice(-4)}`,
       negotiable,
-      description: description || `${title} available for sale in ${city}, ${region}.`,
+      description: description.trim() || `${title.trim()} available for sale in ${city}, ${region}.`,
       images: images.length > 0 ? images : ['https://images.unsplash.com/photo-1526738549149-8e07eca6c147?w=600&auto=format&fit=crop&q=80'],
       sellerName: finalSellerName,
       sellerPhone: finalSellerPhone,
@@ -158,21 +186,33 @@ export const ProductFormModal: React.FC = () => {
       specifications: specsObj
     };
 
-    if (editingProduct) {
-      updateProduct(editingProduct.id, payload);
-    } else {
-      addProduct(payload);
-    }
+    try {
+      let success = false;
+      if (editingProduct) {
+        success = await updateProduct(editingProduct.id, payload);
+      } else {
+        success = await addProduct(payload);
+      }
 
-    if (user && finalSellerPhone) {
-      updateUserProfile({ phone: finalSellerPhone, name: finalSellerName });
-    }
+      if (!success) {
+        throw new Error('Database could not save your listing. Please verify your connection and try again.');
+      }
 
-    setSaveSuccess(true);
-    setTimeout(() => {
-      setSaveSuccess(false);
-      closeCreateProductModal();
-    }, 1500);
+      if (user && finalSellerPhone) {
+        updateUserProfile({ phone: finalSellerPhone, name: finalSellerName });
+      }
+
+      setSaveSuccess(true);
+      setTimeout(() => {
+        setSaveSuccess(false);
+        closeCreateProductModal();
+      }, 1500);
+    } catch (err: any) {
+      console.error('Failed to publish product:', err);
+      setSaveError(err.message || 'Failed to save product to central database. Please try again.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const currentCategoryData = CATEGORIES_WITH_META.find((c) => c.name === category);
@@ -471,21 +511,31 @@ export const ProductFormModal: React.FC = () => {
                 Product Images
               </label>
               <div className="space-y-3">
-                <div className="flex items-center gap-3">
-                  <label className="flex items-center gap-2 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold cursor-pointer transition-colors border border-slate-200">
-                    <Upload className="w-4 h-4 text-emerald-800" />
-                    <span>Upload Image File</span>
+                <div className="flex items-center gap-3 flex-wrap">
+                  <label className={`flex items-center gap-2 px-4 py-2 ${isCompressingImage ? 'bg-slate-200 cursor-not-allowed opacity-75' : 'bg-slate-100 hover:bg-slate-200 cursor-pointer'} text-slate-700 rounded-xl text-xs font-semibold transition-colors border border-slate-200`}>
+                    {isCompressingImage ? (
+                      <Loader2 className="w-4 h-4 text-emerald-800 animate-spin" />
+                    ) : (
+                      <Upload className="w-4 h-4 text-emerald-800" />
+                    )}
+                    <span>{isCompressingImage ? 'Optimizing Image...' : 'Upload Image File'}</span>
                     <input
                       type="file"
                       accept="image/*"
                       multiple
+                      disabled={isCompressingImage}
                       onChange={handleImageFile}
                       className="hidden"
                     />
                   </label>
                   <span className="text-[11px] text-slate-400">
-                    Upload from device or use presets
+                    Auto-compressed to load instantly on all devices (max 5 photos)
                   </span>
+                  {imageNotice && (
+                    <span className="text-[11px] font-medium text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
+                      {imageNotice}
+                    </span>
+                  )}
                 </div>
 
                 {images.length > 0 && (
