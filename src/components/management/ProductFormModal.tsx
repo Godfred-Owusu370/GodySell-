@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useApp } from '../../context/AppContext';
 import {
   X,
@@ -25,6 +25,11 @@ export const ProductFormModal: React.FC = () => {
     user,
     updateUserProfile
   } = useApp();
+
+  const formScrollRef = useRef<HTMLFormElement>(null);
+  const titleInputRef = useRef<HTMLInputElement>(null);
+  const priceInputRef = useRef<HTMLInputElement>(null);
+  const phoneInputRef = useRef<HTMLInputElement>(null);
 
   const [title, setTitle] = useState('');
   const [price, setPrice] = useState('');
@@ -140,15 +145,40 @@ export const ProductFormModal: React.FC = () => {
     );
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!title.trim() || !price) {
-      setSaveError('Please provide a product title and price.');
+  const handleSubmit = async (e?: React.FormEvent | React.MouseEvent) => {
+    if (e && e.preventDefault) {
+      e.preventDefault();
+    }
+
+    if (isSaving) return;
+    setSaveError(null);
+
+    const trimmedTitle = title.trim();
+    if (!trimmedTitle) {
+      setSaveError('Please enter an ad title (e.g. Apple iPhone 15 Pro, Toyota Corolla, Sofa Set).');
+      formScrollRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+      titleInputRef.current?.focus();
+      return;
+    }
+
+    const numPrice = parseFloat(price);
+    if (!price || isNaN(numPrice) || numPrice <= 0) {
+      setSaveError('Please enter a valid price in Ghana Cedis (GH₵).');
+      formScrollRef.current?.scrollTo({ top: 80, behavior: 'smooth' });
+      priceInputRef.current?.focus();
+      return;
+    }
+
+    const finalSellerPhone = sellerPhone.trim() || user?.phone || '+233(0)592836664';
+    const finalSellerName = sellerName.trim() || user?.name || 'My GodySell Shop Ghana';
+
+    if (!finalSellerPhone) {
+      setSaveError('Please enter your phone number so buyers in Ghana can contact you.');
+      phoneInputRef.current?.focus();
       return;
     }
 
     setIsSaving(true);
-    setSaveError(null);
 
     const specsObj: Record<string, string> = {};
     specs.forEach((s) => {
@@ -158,21 +188,19 @@ export const ProductFormModal: React.FC = () => {
     });
 
     const parsedStock = parseInt(stock) || 0;
-    const finalSellerPhone = sellerPhone.trim() || user?.phone || '+233(0)592836664';
-    const finalSellerName = sellerName.trim() || user?.name || 'My GodySell Shop Ghana';
 
     const payload = {
-      title: title.trim(),
-      price: parseFloat(price) || 0,
+      title: trimmedTitle,
+      price: numPrice,
       category,
       subcategory,
       region,
-      city: city.trim() || 'Accra',
+      city: city.trim() || 'East Legon, Accra',
       condition,
       stock: parsedStock,
       sku: sku || `SKU-${Date.now().toString().slice(-4)}`,
       negotiable,
-      description: description.trim() || `${title.trim()} available for sale in ${city}, ${region}.`,
+      description: description.trim() || `${trimmedTitle} available for sale in ${city}, ${region}.`,
       images: images.length > 0 ? images : ['https://images.unsplash.com/photo-1526738549149-8e07eca6c147?w=600&auto=format&fit=crop&q=80'],
       sellerName: finalSellerName,
       sellerPhone: finalSellerPhone,
@@ -252,18 +280,27 @@ export const ProductFormModal: React.FC = () => {
             </p>
           </div>
         ) : (
-          <form onSubmit={handleSubmit} className="p-6 overflow-y-auto space-y-5">
+          <form
+            ref={formScrollRef}
+            noValidate
+            onSubmit={handleSubmit}
+            className="p-6 overflow-y-auto space-y-5"
+          >
             {/* Title */}
             <div>
               <label className="block text-xs font-bold text-slate-800 mb-1">
                 Ad Title <span className="text-rose-500">*</span>
               </label>
               <input
+                ref={titleInputRef}
                 type="text"
                 required
                 placeholder="e.g. Apple iPhone 15 Pro Max 256GB Natural Titanium (Dual SIM)"
                 value={title}
-                onChange={(e) => setTitle(e.target.value)}
+                onChange={(e) => {
+                  setTitle(e.target.value);
+                  if (saveError) setSaveError(null);
+                }}
                 className="w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl text-sm focus:outline-none focus:border-slate-400"
               />
             </div>
@@ -319,12 +356,16 @@ export const ProductFormModal: React.FC = () => {
                     GH₵
                   </span>
                   <input
+                    ref={priceInputRef}
                     type="number"
                     required
                     min="1"
                     placeholder="e.g. 13500"
                     value={price}
-                    onChange={(e) => setPrice(e.target.value)}
+                    onChange={(e) => {
+                      setPrice(e.target.value);
+                      if (saveError) setSaveError(null);
+                    }}
                     className="w-full pl-14 pr-3.5 py-2.5 bg-white border border-slate-300 rounded-xl text-sm font-semibold focus:outline-none focus:border-slate-400"
                   />
                 </div>
@@ -461,11 +502,15 @@ export const ProductFormModal: React.FC = () => {
                       <span className="text-xs font-bold text-slate-300">|</span>
                     </div>
                     <input
+                      ref={phoneInputRef}
                       type="tel"
                       required
                       placeholder="+233(0)592836664"
                       value={sellerPhone}
-                      onChange={(e) => setSellerPhone(e.target.value)}
+                      onChange={(e) => {
+                        setSellerPhone(e.target.value);
+                        if (saveError) setSaveError(null);
+                      }}
                       className="w-full pl-10 pr-3.5 py-2.5 bg-white border border-slate-300 rounded-xl text-xs font-semibold text-slate-900 focus:outline-none focus:ring-1 focus:ring-emerald-700/20 focus:border-slate-400"
                     />
                   </div>
@@ -616,20 +661,46 @@ export const ProductFormModal: React.FC = () => {
               />
             </div>
 
+            {/* Error Message Banner */}
+            {saveError && (
+              <div className="p-3.5 bg-rose-50 border border-rose-300 rounded-xl flex items-start gap-2.5 text-xs text-rose-800 shadow-xs animate-in fade-in duration-150">
+                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <p className="font-bold">Cannot Publish Yet</p>
+                  <p className="text-[11px] text-rose-700 mt-0.5">{saveError}</p>
+                </div>
+              </div>
+            )}
+
             {/* Submit Bar */}
-            <div className="pt-4 border-t border-slate-200 flex items-center justify-end gap-3">
+            <div className="pt-4 border-t border-slate-200 flex items-center justify-end gap-3 sticky bottom-0 bg-white/95 backdrop-blur-xs py-2">
               <button
                 type="button"
+                disabled={isSaving}
                 onClick={closeCreateProductModal}
-                className="px-4 py-2.5 text-xs font-semibold text-slate-600 hover:text-slate-800 rounded-xl"
+                className="px-4 py-2.5 text-xs font-semibold text-slate-600 hover:text-slate-800 rounded-xl disabled:opacity-50"
               >
                 Cancel
               </button>
               <button
                 type="submit"
-                className="px-6 py-2.5 bg-emerald-800 hover:bg-emerald-900 text-white font-bold text-xs rounded-xl transition-colors shadow-sm flex items-center gap-2"
+                disabled={isSaving || isCompressingImage}
+                onClick={handleSubmit}
+                className="px-6 py-2.5 bg-emerald-800 hover:bg-emerald-900 active:bg-emerald-950 active:scale-[0.98] text-white font-bold text-xs rounded-xl transition-all shadow-sm flex items-center gap-2 disabled:opacity-75 disabled:cursor-not-allowed cursor-pointer"
               >
-                <span>{editingProduct ? 'Update Product' : 'Publish to GodySell Ghana'}</span>
+                {isSaving ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin text-white" />
+                    <span>Publishing to GodySell Ghana...</span>
+                  </>
+                ) : isCompressingImage ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin text-white" />
+                    <span>Optimizing Photos...</span>
+                  </>
+                ) : (
+                  <span>{editingProduct ? 'Update Product' : 'Publish to GodySell Ghana'}</span>
+                )}
               </button>
             </div>
           </form>

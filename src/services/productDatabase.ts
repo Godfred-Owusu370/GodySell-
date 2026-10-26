@@ -132,50 +132,59 @@ export async function syncCatalogToCloud(products: Product[]): Promise<boolean> 
   let savedSuccessfully = false;
   let lastError = '';
 
-  // 1. Sync to Primary Cloud Database
-  try {
-    const res = await fetchWithTimeout(PRIMARY_CLOUD_DB_URL, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: payload
-    });
-
-    if (res.ok) {
-      savedSuccessfully = true;
-    } else {
-      lastError = `Primary HTTP ${res.status}: ${await res.text().catch(() => '')}`;
-      console.warn('Primary cloud DB save warning:', lastError);
-    }
-  } catch (err: any) {
-    lastError = err?.message || 'Network error on primary';
-    console.warn('Primary cloud DB error:', lastError);
-  }
-
-  // 2. Sync to Backup Cloud Database (for redundancy or if primary failed)
-  try {
-    const backupRes = await fetchWithTimeout(BACKUP_CLOUD_DB_URL, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: payload
-    });
-
-    if (backupRes.ok) {
-      savedSuccessfully = true;
-    }
-  } catch (backupErr) {
-    console.warn('Backup cloud DB sync warning:', backupErr);
-  }
-
-  // 3. Also notify /api/products/sync-all in local development
+  // 1. In browser, use /api/products (same-origin, proxies to cloud DB with no browser CORS preflight issue)
   if (typeof window !== 'undefined') {
-    fetch('/api/products/sync-all', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: payload
-    }).catch(() => {});
+    try {
+      const apiRes = await fetchWithTimeout('/api/products', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: payload
+      });
+      if (apiRes.ok) {
+        savedSuccessfully = true;
+      }
+    } catch (e: any) {
+      console.warn('/api/products sync failed:', e);
+    }
   }
 
+  // 2. Direct Cloud Database (works in Node.js or when CORS allows)
   if (!savedSuccessfully) {
+    try {
+      const res = await fetchWithTimeout(PRIMARY_CLOUD_DB_URL, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: payload
+      });
+
+      if (res.ok) {
+        savedSuccessfully = true;
+      } else {
+        lastError = `Primary HTTP ${res.status}`;
+      }
+    } catch (err: any) {
+      lastError = err?.message || 'Network error on primary';
+    }
+  }
+
+  // 3. Backup Cloud Database
+  if (!savedSuccessfully) {
+    try {
+      const backupRes = await fetchWithTimeout(BACKUP_CLOUD_DB_URL, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: payload
+      });
+
+      if (backupRes.ok) {
+        savedSuccessfully = true;
+      }
+    } catch (backupErr) {
+      console.warn('Backup cloud DB sync warning:', backupErr);
+    }
+  }
+
+  if (!savedSuccessfully && typeof window === 'undefined') {
     throw new Error(`Failed to save product to central database: ${lastError || 'Network timeout'}`);
   }
 
@@ -186,6 +195,26 @@ export async function syncCatalogToCloud(products: Product[]): Promise<boolean> 
  * Publish a new product to the shared online database
  */
 export async function publishProductToCloud(product: Product): Promise<Product[]> {
+  // 1. Try /api/products directly in browser (Vercel serverless proxy with no CORS issues)
+  if (typeof window !== 'undefined') {
+    try {
+      const res = await fetchWithTimeout('/api/products', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(product)
+      });
+      if (res.ok) {
+        const current = await fetchOnlineProducts().catch(() => []);
+        const updated = [product, ...current.filter((p) => p.id !== product.id)];
+        setLocalItem(LOCAL_STORAGE_KEY, JSON.stringify(updated));
+        return updated;
+      }
+    } catch (err) {
+      console.warn('POST /api/products failed, falling back to direct cloud sync:', err);
+    }
+  }
+
+  // 2. Fallback to direct cloud sync
   const current = await fetchOnlineProducts();
   const updated = [product, ...current.filter((p) => p.id !== product.id)];
   await syncCatalogToCloud(updated);
@@ -196,6 +225,24 @@ export async function publishProductToCloud(product: Product): Promise<Product[]
  * Update an existing product in the shared online database
  */
 export async function updateProductInCloud(productId: string, updates: Partial<Product>): Promise<Product[]> {
+  if (typeof window !== 'undefined') {
+    try {
+      const res = await fetchWithTimeout(`/api/products?id=${encodeURIComponent(productId)}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates)
+      });
+      if (res.ok) {
+        const current = await fetchOnlineProducts().catch(() => []);
+        const updated = current.map((p) => (p.id === productId ? { ...p, ...updates } : p));
+        setLocalItem(LOCAL_STORAGE_KEY, JSON.stringify(updated));
+        return updated;
+      }
+    } catch {
+      // Fallback
+    }
+  }
+
   const current = await fetchOnlineProducts();
   const updated = current.map((p) => (p.id === productId ? { ...p, ...updates } : p));
   await syncCatalogToCloud(updated);
@@ -206,6 +253,22 @@ export async function updateProductInCloud(productId: string, updates: Partial<P
  * Delete a product from the shared online database
  */
 export async function deleteProductFromCloud(productId: string): Promise<Product[]> {
+  if (typeof window !== 'undefined') {
+    try {
+      const res = await fetchWithTimeout(`/api/products?id=${encodeURIComponent(productId)}`, {
+        method: 'DELETE'
+      });
+      if (res.ok) {
+        const current = await fetchOnlineProducts().catch(() => []);
+        const updated = current.filter((p) => p.id !== productId);
+        setLocalItem(LOCAL_STORAGE_KEY, JSON.stringify(updated));
+        return updated;
+      }
+    } catch {
+      // Fallback
+    }
+  }
+
   const current = await fetchOnlineProducts();
   const updated = current.filter((p) => p.id !== productId);
   await syncCatalogToCloud(updated);

@@ -75,7 +75,13 @@ export default async function handler(req: any, res: any) {
     }
 
     if (req.method === 'POST') {
-      const newProduct = req.body;
+      const body = req.body;
+      if (body && Array.isArray(body.products)) {
+        await saveToCloud(body.products);
+        return res.status(200).json({ success: true, count: body.products.length });
+      }
+
+      const newProduct = body;
       if (!newProduct || !newProduct.title) {
         return res.status(400).json({ error: 'Title is required' });
       }
