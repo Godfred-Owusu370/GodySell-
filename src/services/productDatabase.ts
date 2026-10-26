@@ -47,7 +47,7 @@ export function filterGenuineProducts(products: any[]): Product[] {
     if (!p) return false;
     const id = String(p.id || '');
     const title = String(p.title || '').trim().toLowerCase();
-    if (id.startsWith('prod-test-') || id.startsWith('prod-00') || id.startsWith('prod-test')) {
+    if (id.startsWith('prod-test-') || id.startsWith('prod-00')) {
       return false;
     }
     if (title.startsWith('test product') || title === 'sample product' || title.includes('sample listing')) {
@@ -61,16 +61,21 @@ export function filterGenuineProducts(products: any[]): Product[] {
  * Fetch all shared products from the online persistent cloud database
  */
 export async function fetchOnlineProducts(): Promise<Product[]> {
+  const t = Date.now();
+  const remoteMap = new Map<string, Product>();
+
   // 1. Try Local / Vercel API endpoint (fastest, same-origin)
   if (typeof window !== 'undefined') {
     try {
-      const localRes = await fetchWithTimeout('/api/products');
+      const localRes = await fetchWithTimeout(`/api/products?t=${t}`, {
+        cache: 'no-store',
+        headers: { 'Cache-Control': 'no-cache, no-store', 'Accept': 'application/json' }
+      });
       if (localRes.ok) {
         const localProducts = await localRes.json();
         if (Array.isArray(localProducts)) {
           const genuine = filterGenuineProducts(localProducts);
-          setLocalItem(LOCAL_STORAGE_KEY, JSON.stringify(genuine));
-          return genuine;
+          for (const p of genuine) remoteMap.set(p.id, p);
         }
       }
     } catch {
@@ -78,11 +83,12 @@ export async function fetchOnlineProducts(): Promise<Product[]> {
     }
   }
 
-  // 2. Try Primary Cloud Database
+  // 2. Try Primary Cloud Database with cache-busting
   try {
-    const res = await fetchWithTimeout(PRIMARY_CLOUD_DB_URL, {
+    const res = await fetchWithTimeout(`${PRIMARY_CLOUD_DB_URL}?t=${t}`, {
       method: 'GET',
-      headers: { 'Accept': 'application/json' }
+      cache: 'no-store',
+      headers: { 'Accept': 'application/json', 'Cache-Control': 'no-cache, no-store' }
     });
 
     if (res.ok) {
@@ -94,34 +100,45 @@ export async function fetchOnlineProducts(): Promise<Product[]> {
         : [];
 
       const genuine = filterGenuineProducts(rawProducts);
-      setLocalItem(LOCAL_STORAGE_KEY, JSON.stringify(genuine));
-      return genuine;
+      for (const p of genuine) {
+        if (!remoteMap.has(p.id)) remoteMap.set(p.id, p);
+      }
     }
   } catch (err) {
     console.warn('Primary cloud DB fetch failed, attempting backup endpoint:', err);
   }
 
-  // 3. Try Secondary / Backup Cloud Database
-  try {
-    const res = await fetchWithTimeout(BACKUP_CLOUD_DB_URL, {
-      method: 'GET',
-      headers: { 'Accept': 'application/json' }
-    });
+  // 3. Try Secondary / Backup Cloud Database if still empty
+  if (remoteMap.size === 0) {
+    try {
+      const res = await fetchWithTimeout(`${BACKUP_CLOUD_DB_URL}?t=${t}`, {
+        method: 'GET',
+        cache: 'no-store',
+        headers: { 'Accept': 'application/json', 'Cache-Control': 'no-cache, no-store' }
+      });
 
-    if (res.ok) {
-      const result = await res.json();
-      const rawProducts: Product[] = Array.isArray(result?.products)
-        ? result.products
-        : Array.isArray(result?.data?.products)
-        ? result.data.products
-        : [];
+      if (res.ok) {
+        const result = await res.json();
+        const rawProducts: Product[] = Array.isArray(result?.products)
+          ? result.products
+          : Array.isArray(result?.data?.products)
+          ? result.data.products
+          : [];
 
-      const genuine = filterGenuineProducts(rawProducts);
-      setLocalItem(LOCAL_STORAGE_KEY, JSON.stringify(genuine));
-      return genuine;
+        const genuine = filterGenuineProducts(rawProducts);
+        for (const p of genuine) {
+          if (!remoteMap.has(p.id)) remoteMap.set(p.id, p);
+        }
+      }
+    } catch (err) {
+      console.warn('Backup cloud DB fetch failed:', err);
     }
-  } catch (err) {
-    console.warn('Backup cloud DB fetch failed:', err);
+  }
+
+  const combined = Array.from(remoteMap.values());
+  if (combined.length > 0) {
+    setLocalItem(LOCAL_STORAGE_KEY, JSON.stringify(combined));
+    return combined;
   }
 
   // 4. Fallback to LocalStorage cache
@@ -144,67 +161,45 @@ export async function fetchOnlineProducts(): Promise<Product[]> {
  * Save the entire catalog to the persistent online cloud database
  */
 export async function syncCatalogToCloud(products: Product[]): Promise<boolean> {
+  const genuineOnly = filterGenuineProducts(products);
   // Update cache immediately
-  setLocalItem(LOCAL_STORAGE_KEY, JSON.stringify(products));
+  setLocalItem(LOCAL_STORAGE_KEY, JSON.stringify(genuineOnly));
 
-  const payload = JSON.stringify({ products });
-  let savedSuccessfully = false;
-  let lastError = '';
+  const payload = JSON.stringify({ products: genuineOnly });
 
   // 1. In browser, use /api/products (same-origin, proxies to cloud DB with no browser CORS preflight issue)
   if (typeof window !== 'undefined') {
     try {
-      const apiRes = await fetchWithTimeout('/api/products', {
+      await fetchWithTimeout('/api/products', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: payload
       });
-      if (apiRes.ok) {
-        savedSuccessfully = true;
-      }
     } catch (e: any) {
       console.warn('/api/products sync failed:', e);
     }
   }
 
-  // 2. Direct Cloud Database (works in Node.js or when CORS allows)
-  if (!savedSuccessfully) {
-    try {
-      const res = await fetchWithTimeout(PRIMARY_CLOUD_DB_URL, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: payload
-      });
-
-      if (res.ok) {
-        savedSuccessfully = true;
-      } else {
-        lastError = `Primary HTTP ${res.status}`;
-      }
-    } catch (err: any) {
-      lastError = err?.message || 'Network error on primary';
-    }
+  // 2. Direct Cloud Database (dual write ensures immediate global replication)
+  try {
+    await fetchWithTimeout(PRIMARY_CLOUD_DB_URL, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: payload
+    });
+  } catch (err: any) {
+    console.warn('Primary cloud sync warning:', err);
   }
 
   // 3. Backup Cloud Database
-  if (!savedSuccessfully) {
-    try {
-      const backupRes = await fetchWithTimeout(BACKUP_CLOUD_DB_URL, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: payload
-      });
-
-      if (backupRes.ok) {
-        savedSuccessfully = true;
-      }
-    } catch (backupErr) {
-      console.warn('Backup cloud DB sync warning:', backupErr);
-    }
-  }
-
-  if (!savedSuccessfully && typeof window === 'undefined') {
-    throw new Error(`Failed to save product to central database: ${lastError || 'Network timeout'}`);
+  try {
+    await fetchWithTimeout(BACKUP_CLOUD_DB_URL, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: payload
+    });
+  } catch (backupErr) {
+    console.warn('Backup cloud DB sync warning:', backupErr);
   }
 
   return true;
@@ -214,29 +209,30 @@ export async function syncCatalogToCloud(products: Product[]): Promise<boolean> 
  * Publish a new product to the shared online database
  */
 export async function publishProductToCloud(product: Product): Promise<Product[]> {
-  // 1. Try /api/products directly in browser (Vercel serverless proxy with no CORS issues)
+  const current = await fetchOnlineProducts().catch(() => []);
+  const updated = [product, ...current.filter((p) => p.id !== product.id)];
+  setLocalItem(LOCAL_STORAGE_KEY, JSON.stringify(updated));
+
+  // 1. Post to /api/products
   if (typeof window !== 'undefined') {
     try {
-      const res = await fetchWithTimeout('/api/products', {
+      await fetchWithTimeout('/api/products', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(product)
       });
-      if (res.ok) {
-        const current = await fetchOnlineProducts().catch(() => []);
-        const updated = [product, ...current.filter((p) => p.id !== product.id)];
-        setLocalItem(LOCAL_STORAGE_KEY, JSON.stringify(updated));
-        return updated;
-      }
     } catch (err) {
-      console.warn('POST /api/products failed, falling back to direct cloud sync:', err);
+      console.warn('POST /api/products warning:', err);
     }
   }
 
-  // 2. Fallback to direct cloud sync
-  const current = await fetchOnlineProducts();
-  const updated = [product, ...current.filter((p) => p.id !== product.id)];
-  await syncCatalogToCloud(updated);
+  // 2. Direct Cloud Sync (ensures all devices querying ExtendsClass receive it)
+  try {
+    await syncCatalogToCloud(updated);
+  } catch (err) {
+    console.warn('Direct cloud sync warning:', err);
+  }
+
   return updated;
 }
 

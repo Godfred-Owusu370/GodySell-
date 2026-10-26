@@ -63,6 +63,9 @@ export const MarketplaceView: React.FC = () => {
     if (sortBy === 'newest') return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
     if (a.status === 'boosted' && b.status !== 'boosted') return -1;
     if (b.status === 'boosted' && a.status !== 'boosted') return 1;
+    // Prioritize newest published items so new ads immediately appear at the top
+    const dateDiff = new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    if (!isNaN(dateDiff) && dateDiff !== 0) return dateDiff;
     return b.views - a.views;
   });
 

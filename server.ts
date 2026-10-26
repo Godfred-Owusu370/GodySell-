@@ -19,11 +19,81 @@ if (!fs.existsSync(DATA_FILE)) {
   fs.writeFileSync(DATA_FILE, '[]', 'utf8');
 }
 
+const PRIMARY_CLOUD_DB_URL = 'https://extendsclass.com/api/json-storage/bin/abfaaea';
+const BACKUP_CLOUD_DB_URL = 'https://extendsclass.com/api/json-storage/bin/adabcaa';
+
+function isRealProduct(p: any): boolean {
+  if (!p) return false;
+  const id = String(p.id || '');
+  const title = String(p.title || '').trim().toLowerCase();
+  if (id.startsWith('prod-test-') || id.startsWith('prod-00')) return false;
+  if (title.startsWith('test product') || title === 'sample product' || title.includes('sample listing')) return false;
+  return true;
+}
+
+async function fetchFromCloudRemote(): Promise<any[]> {
+  const cacheBuster = `?t=${Date.now()}`;
+  try {
+    const res = await fetch(`${PRIMARY_CLOUD_DB_URL}${cacheBuster}`, {
+      cache: 'no-store',
+      headers: { 'Cache-Control': 'no-cache, no-store', Accept: 'application/json' }
+    });
+    if (res.ok) {
+      const data: any = await res.json();
+      const list = Array.isArray(data?.products) ? data.products : [];
+      return list.filter(isRealProduct);
+    }
+  } catch (e) {
+    console.warn('Server: Primary cloud fetch failed:', e);
+  }
+
+  try {
+    const res = await fetch(`${BACKUP_CLOUD_DB_URL}${cacheBuster}`, {
+      cache: 'no-store',
+      headers: { 'Cache-Control': 'no-cache, no-store', Accept: 'application/json' }
+    });
+    if (res.ok) {
+      const data: any = await res.json();
+      const list = Array.isArray(data?.products) ? data.products : [];
+      return list.filter(isRealProduct);
+    }
+  } catch (e) {
+    console.warn('Server: Backup cloud fetch failed:', e);
+  }
+
+  return [];
+}
+
+async function pushToCloudRemote(products: any[]) {
+  const clean = products.filter(isRealProduct);
+  const payload = JSON.stringify({ products: clean });
+  try {
+    await fetch(PRIMARY_CLOUD_DB_URL, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: payload
+    });
+  } catch (e) {
+    console.warn('Server: Primary push failed:', e);
+  }
+
+  try {
+    await fetch(BACKUP_CLOUD_DB_URL, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: payload
+    });
+  } catch (e) {
+    console.warn('Server: Backup push failed:', e);
+  }
+}
+
 // Memory cache & helper functions
 function readProducts(): any[] {
   try {
     const raw = fs.readFileSync(DATA_FILE, 'utf8');
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter(isRealProduct) : [];
   } catch (err) {
     console.error('Error reading products file:', err);
     return [];
@@ -32,7 +102,8 @@ function readProducts(): any[] {
 
 function writeProducts(products: any[]) {
   try {
-    fs.writeFileSync(DATA_FILE, JSON.stringify(products, null, 2), 'utf8');
+    const clean = products.filter(isRealProduct);
+    fs.writeFileSync(DATA_FILE, JSON.stringify(clean, null, 2), 'utf8');
   } catch (err) {
     console.error('Error writing products file:', err);
   }
@@ -42,7 +113,8 @@ function writeProducts(products: any[]) {
 const sseClients = new Set<Response>();
 
 function broadcastProducts(products: any[]) {
-  const payload = `data: ${JSON.stringify(products)}\n\n`;
+  const clean = products.filter(isRealProduct);
+  const payload = `data: ${JSON.stringify(clean)}\n\n`;
   for (const client of sseClients) {
     try {
       client.write(payload);
@@ -67,11 +139,14 @@ setInterval(() => {
 app.use(express.json({ limit: '15mb' }));
 app.use(express.urlencoded({ extended: true, limit: '15mb' }));
 
-// CORS
+// CORS & Real-time No-Cache Headers
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  res.header('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+  res.header('Pragma', 'no-cache');
+  res.header('Expires', '0');
   if (req.method === 'OPTIONS') {
     return res.sendStatus(200);
   }
@@ -79,9 +154,31 @@ app.use((req, res, next) => {
 });
 
 // API Routes
-app.get('/api/products', (req: Request, res: Response) => {
-  const products = readProducts();
-  res.json(products);
+app.get('/api/products', async (req: Request, res: Response) => {
+  try {
+    const local = readProducts();
+    const remote = await fetchFromCloudRemote();
+
+    // Merge by ID, keeping all genuine listings
+    const map = new Map<string, any>();
+    for (const p of remote) {
+      if (isRealProduct(p)) map.set(p.id, p);
+    }
+    for (const p of local) {
+      if (isRealProduct(p) && !map.has(p.id)) {
+        map.set(p.id, p);
+      }
+    }
+
+    const merged = Array.from(map.values());
+    if (merged.length !== local.length) {
+      writeProducts(merged);
+    }
+
+    res.json(merged);
+  } catch {
+    res.json(readProducts());
+  }
 });
 
 // Real-Time Server-Sent Events (SSE) Stream
@@ -104,13 +201,15 @@ app.get('/api/products/stream', (req: Request, res: Response) => {
   });
 });
 
-app.post('/api/products', (req: Request, res: Response) => {
+app.post('/api/products', async (req: Request, res: Response) => {
   try {
     const body = req.body;
     if (body && Array.isArray(body.products)) {
-      writeProducts(body.products);
-      broadcastProducts(body.products);
-      return res.status(200).json({ success: true, count: body.products.length });
+      const clean = body.products.filter(isRealProduct);
+      writeProducts(clean);
+      broadcastProducts(clean);
+      pushToCloudRemote(clean).catch(() => {});
+      return res.status(200).json({ success: true, count: clean.length });
     }
 
     const productData = body;
@@ -118,7 +217,7 @@ app.post('/api/products', (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Title is required' });
     }
 
-    const products = readProducts();
+    const localProducts = readProducts();
     const newProduct = {
       ...productData,
       id: productData.id || `prod-${Date.now().toString().slice(-6)}`,
@@ -129,9 +228,12 @@ app.post('/api/products', (req: Request, res: Response) => {
     };
 
     // Prepend so newest appears first
-    const updated = [newProduct, ...products.filter(p => p.id !== newProduct.id)];
+    const updated = [newProduct, ...localProducts.filter((p: any) => p.id !== newProduct.id)];
     writeProducts(updated);
     broadcastProducts(updated);
+
+    // Push to cloud remote in background
+    pushToCloudRemote(updated).catch(() => {});
 
     res.status(201).json(newProduct);
   } catch (error) {

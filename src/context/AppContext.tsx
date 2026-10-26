@@ -653,10 +653,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     window.addEventListener('visibilitychange', handleVisibilityChange);
     window.addEventListener('focus', silentSync);
 
-    // 3. Gentle background sync every 45 seconds (completely silent, no UI flickering)
-    const pollInterval = setInterval(silentSync, 45000);
+    // 3. Completely silent background polling every 6 seconds so any item published by any seller appears on everyone's screen in seconds without page flickering
+    const pollInterval = setInterval(silentSync, 6000);
 
-    // 4. Also listen to SSE stream if available (for local dev server)
+    // 4. Also listen to SSE stream if available (for real-time server push)
     let eventSource: EventSource | null = null;
     try {
       eventSource = new EventSource('/api/products/stream');
@@ -665,7 +665,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         try {
           const liveProducts: Product[] = JSON.parse(event.data);
           if (Array.isArray(liveProducts)) {
-            setProducts(liveProducts);
+            const genuine = liveProducts.filter((p) => !isDemoOrTestProduct(p));
+            setProducts((current) => {
+              const map = new Map<string, Product>();
+              for (const p of genuine) map.set(p.id, p);
+              for (const p of current) {
+                if (!isDemoOrTestProduct(p) && !map.has(p.id)) {
+                  map.set(p.id, p);
+                }
+              }
+              const merged = Array.from(map.values());
+              if (JSON.stringify(current) !== JSON.stringify(merged)) {
+                return merged;
+              }
+              return current;
+            });
           }
         } catch {
           // ignore keepalive
@@ -673,7 +687,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       };
       eventSource.onerror = () => {};
     } catch {
-      // Handled by polling
+      // Handled by background polling
     }
 
     return () => {

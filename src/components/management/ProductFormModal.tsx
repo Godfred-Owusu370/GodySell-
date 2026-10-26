@@ -209,7 +209,7 @@ export const ProductFormModal: React.FC = () => {
       sellerRating: editingProduct?.sellerRating || 5.0,
       sellerReviewCount: editingProduct?.sellerReviewCount || 1,
       verifiedSeller: true,
-      status: (parsedStock > 0 ? 'active' : 'paused') as any,
+      status: 'active' as any,
       featured: false,
       specifications: specsObj
     };

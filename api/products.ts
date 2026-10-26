@@ -7,14 +7,18 @@ function isRealProduct(p: any): boolean {
   if (!p) return false;
   const id = String(p.id || '');
   const title = String(p.title || '').trim().toLowerCase();
-  if (id.startsWith('prod-test-') || id.startsWith('prod-00') || id.includes('test')) return false;
+  if (id.startsWith('prod-test-') || id.startsWith('prod-00')) return false;
   if (title.startsWith('test product') || title === 'sample product' || title.includes('sample listing')) return false;
   return true;
 }
 
 async function fetchFromCloud() {
+  const cacheBuster = `?t=${Date.now()}`;
   try {
-    const res = await fetch(PRIMARY_CLOUD_DB_URL);
+    const res = await fetch(`${PRIMARY_CLOUD_DB_URL}${cacheBuster}`, {
+      cache: 'no-store',
+      headers: { 'Cache-Control': 'no-cache, no-store' }
+    });
     if (res.ok) {
       const data = await res.json();
       const list = Array.isArray(data?.products) ? data.products : [];
@@ -25,7 +29,10 @@ async function fetchFromCloud() {
   }
 
   try {
-    const res = await fetch(BACKUP_CLOUD_DB_URL);
+    const res = await fetch(`${BACKUP_CLOUD_DB_URL}${cacheBuster}`, {
+      cache: 'no-store',
+      headers: { 'Cache-Control': 'no-cache, no-store' }
+    });
     if (res.ok) {
       const data = await res.json();
       const list = Array.isArray(data?.products) ? data.products : [];
@@ -74,6 +81,10 @@ export default async function handler(req: any, res: any) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  // Disable any caching so all devices get real-time listings immediately
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
 
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
