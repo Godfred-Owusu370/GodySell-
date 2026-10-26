@@ -106,7 +106,14 @@ app.get('/api/products/stream', (req: Request, res: Response) => {
 
 app.post('/api/products', (req: Request, res: Response) => {
   try {
-    const productData = req.body;
+    const body = req.body;
+    if (body && Array.isArray(body.products)) {
+      writeProducts(body.products);
+      broadcastProducts(body.products);
+      return res.status(200).json({ success: true, count: body.products.length });
+    }
+
+    const productData = body;
     if (!productData || !productData.title) {
       return res.status(400).json({ error: 'Title is required' });
     }

@@ -231,21 +231,7 @@ export const MarketplaceView: React.FC = () => {
             )}
           </div>
 
-          {products.length === 0 && isSyncing ? (
-            /* Skeleton loader while fetching from central database */
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
-              {[1, 2, 3, 4].map((i) => (
-                <div key={i} className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-2xs animate-pulse">
-                  <div className="aspect-square bg-slate-200" />
-                  <div className="p-3 space-y-2">
-                    <div className="h-3.5 bg-slate-200 rounded-md w-3/4" />
-                    <div className="h-4 bg-slate-200 rounded-md w-1/2" />
-                    <div className="h-3 bg-slate-100 rounded-md w-2/3" />
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : products.length === 0 ? (
+          {products.length === 0 ? (
             <div className="bg-white rounded-xl border border-slate-200 p-8 sm:p-12 text-center space-y-4 shadow-2xs">
               <div className="w-12 h-12 rounded-xl bg-slate-100 text-slate-600 mx-auto flex items-center justify-center">
                 <Package className="w-6 h-6 text-slate-500" />

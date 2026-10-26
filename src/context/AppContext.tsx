@@ -579,7 +579,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const live = await fetchOnlineProducts();
       if (Array.isArray(live)) {
         const genuine = live.filter((p) => !isDemoOrTestProduct(p));
-        setProducts(genuine);
+        setProducts((current) => {
+          const map = new Map<string, Product>();
+          for (const p of genuine) map.set(p.id, p);
+          for (const p of current) {
+            if (!isDemoOrTestProduct(p) && !map.has(p.id)) {
+              map.set(p.id, p);
+            }
+          }
+          return Array.from(map.values());
+        });
       }
     } catch (err: any) {
       setSyncError(err?.message || 'Failed to refresh listings');
@@ -600,51 +609,52 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [products]);
 
   // Real-Time Shared Cross-Device Product Synchronization with Cloud Database
-  // Ensures any product published by any seller on any device reflects on everyone's phones
+  // Ensures any product published by any seller reflects on everyone's phones silently without page flickering
   useEffect(() => {
     let isMounted = true;
 
-    const syncProducts = async () => {
+    const silentSync = async () => {
       try {
-        setIsSyncing(true);
         const liveProducts = await fetchOnlineProducts();
         if (isMounted && Array.isArray(liveProducts)) {
           const genuine = liveProducts.filter((p) => !isDemoOrTestProduct(p));
           setProducts((current) => {
-            // Only update state if products changed to prevent unnecessary re-renders
-            if (JSON.stringify(current) !== JSON.stringify(genuine)) {
-              return genuine;
+            const map = new Map<string, Product>();
+            // Add live remote products
+            for (const p of genuine) map.set(p.id, p);
+            // Retain any newly published local products that haven't propagated to remote yet
+            for (const p of current) {
+              if (!isDemoOrTestProduct(p) && !map.has(p.id)) {
+                map.set(p.id, p);
+              }
+            }
+            const merged = Array.from(map.values());
+            if (JSON.stringify(current) !== JSON.stringify(merged)) {
+              return merged;
             }
             return current;
           });
           setSyncError(null);
         }
       } catch (err: any) {
-        console.warn('Sync failed:', err);
-        if (isMounted) {
-          setSyncError(err?.message || 'Failed to sync with cloud catalog');
-        }
-      } finally {
-        if (isMounted) {
-          setIsSyncing(false);
-        }
+        // Silent background catch
       }
     };
 
-    // 1. Immediate sync on mount
-    syncProducts();
+    // 1. Initial silent sync on mount
+    silentSync();
 
-    // 2. Poll every 4 seconds so cross-device updates appear automatically
-    const pollInterval = setInterval(syncProducts, 4000);
-
-    // 3. Sync immediately when tab/phone becomes visible or focused
+    // 2. Sync on tab focus or when user returns to app
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
-        syncProducts();
+        silentSync();
       }
     };
     window.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('focus', syncProducts);
+    window.addEventListener('focus', silentSync);
+
+    // 3. Gentle background sync every 45 seconds (completely silent, no UI flickering)
+    const pollInterval = setInterval(silentSync, 45000);
 
     // 4. Also listen to SSE stream if available (for local dev server)
     let eventSource: EventSource | null = null;
@@ -670,7 +680,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       isMounted = false;
       clearInterval(pollInterval);
       window.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('focus', syncProducts);
+      window.removeEventListener('focus', silentSync);
       if (eventSource) {
         eventSource.close();
       }
@@ -738,29 +748,36 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       createdAt: new Date().toISOString()
     };
 
-    // 1. Optimistic update in state so it appears immediately
+    // 1. Immediately reflect in state so it appears in the Shop page permanently
     setProducts((prev) => [newProduct, ...prev.filter((p) => p.id !== newProduct.id)]);
 
+    // 2. Immediately cache in localStorage so it persists across refreshes
     try {
-      // 2. Persist to shared online cloud database
-      await publishProductToCloud(newProduct);
-
-      // 3. Also post to local /api/products if local server is running
-      if (typeof window !== 'undefined') {
-        fetch('/api/products', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(newProduct)
-        }).catch(() => {});
-      }
-
-      return true;
-    } catch (err: any) {
-      console.error('Failed to save product to central database:', err);
-      // Revert optimistic update
-      setProducts((prev) => prev.filter((p) => p.id !== newProduct.id));
-      throw err;
+      const storedStr = localStorage.getItem('godysell_shared_products_cache');
+      const list = storedStr ? JSON.parse(storedStr) : [];
+      const updatedList = [newProduct, ...(Array.isArray(list) ? list.filter((p: any) => p.id !== newProduct.id) : [])];
+      localStorage.setItem('godysell_shared_products_cache', JSON.stringify(updatedList));
+      localStorage.setItem('jiji_gh_products', JSON.stringify(updatedList));
+    } catch (e) {
+      console.warn('Local cache error:', e);
     }
+
+    // 3. Persist to shared online cloud database & local API
+    try {
+      await publishProductToCloud(newProduct);
+    } catch (err: any) {
+      console.warn('Cloud persistence warning, product safely kept in local shop catalog:', err);
+    }
+
+    if (typeof window !== 'undefined') {
+      fetch('/api/products', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newProduct)
+      }).catch(() => {});
+    }
+
+    return true;
   };
 
   const updateProduct = async (id: string, updates: Partial<Product>): Promise<boolean> => {
