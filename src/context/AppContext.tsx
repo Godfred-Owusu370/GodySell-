@@ -17,8 +17,14 @@ import {
   fetchOnlineProducts,
   publishProductToCloud,
   updateProductInCloud,
-  deleteProductFromCloud
+  deleteProductFromCloud,
+  subscribeToSupabaseProducts
 } from '../services/productDatabase';
+import {
+  syncUserProfileToSupabase,
+  submitUserReportToSupabase,
+  submitSupportMessageToSupabase
+} from '../services/supabase';
 
 interface AppContextType {
   user: UserProfile | null;
@@ -112,6 +118,8 @@ interface AppContextType {
   myLowStockCount: number;
   myOutOfStockCount: number;
   isProductOwner: (productOrId: Product | string) => boolean;
+  submitReport: (report: { reportedProductId?: string; reportedSellerEmail?: string; reporterEmail?: string; reason: string; details?: string; }) => Promise<boolean>;
+  submitSupportMessage: (support: { userName: string; userEmail: string; userPhone?: string; subject: string; message: string; }) => Promise<boolean>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -163,6 +171,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setUser(newUser);
     try {
       localStorage.setItem('godysell_user', JSON.stringify(newUser));
+      syncUserProfileToSupabase(newUser).catch(() => {});
     } catch (e) {
       console.error(e);
     }
@@ -174,6 +183,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const updated = { ...prev, ...updates };
       try {
         localStorage.setItem('godysell_user', JSON.stringify(updated));
+        syncUserProfileToSupabase(updated).catch(() => {});
       } catch (e) {
         console.error(e);
       }
@@ -608,11 +618,38 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   }, [products]);
 
-  // Real-Time Shared Cross-Device Product Synchronization with Cloud Database
-  // Ensures any product published by any seller reflects on everyone's phones silently without page flickering
+  // Real-Time Shared Cross-Device Product Synchronization with Supabase PostgreSQL
+  // Supabase Realtime channel ensures that when Seller A publishes an item, Seller B on another device sees it immediately without page reloading
   useEffect(() => {
     let isMounted = true;
 
+    // 1. Live Supabase Realtime Channel Subscription
+    const unsubscribeSupabase = subscribeToSupabaseProducts(
+      (liveProducts) => {
+        if (!isMounted) return;
+        const genuine = liveProducts.filter((p) => !isDemoOrTestProduct(p));
+        setProducts((current) => {
+          const map = new Map<string, Product>();
+          for (const p of genuine) map.set(p.id, p);
+          for (const p of current) {
+            if (!isDemoOrTestProduct(p) && !map.has(p.id)) {
+              map.set(p.id, p);
+            }
+          }
+          const merged = Array.from(map.values());
+          if (JSON.stringify(current) !== JSON.stringify(merged)) {
+            return merged;
+          }
+          return current;
+        });
+        setSyncError(null);
+      },
+      (err) => {
+        console.warn('Supabase real-time subscription notice:', err);
+      }
+    );
+
+    // 2. Fallback polling for backup channels
     const silentSync = async () => {
       try {
         const liveProducts = await fetchOnlineProducts();
@@ -620,9 +657,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           const genuine = liveProducts.filter((p) => !isDemoOrTestProduct(p));
           setProducts((current) => {
             const map = new Map<string, Product>();
-            // Add live remote products
             for (const p of genuine) map.set(p.id, p);
-            // Retain any newly published local products that haven't propagated to remote yet
             for (const p of current) {
               if (!isDemoOrTestProduct(p) && !map.has(p.id)) {
                 map.set(p.id, p);
@@ -641,10 +676,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     };
 
-    // 1. Initial silent sync on mount
+    // Initial silent sync on mount
     silentSync();
 
-    // 2. Sync on tab focus or when user returns to app
+    // Sync on tab focus or when user returns to app
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
         silentSync();
@@ -653,51 +688,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     window.addEventListener('visibilitychange', handleVisibilityChange);
     window.addEventListener('focus', silentSync);
 
-    // 3. Completely silent background polling every 6 seconds so any item published by any seller appears on everyone's screen in seconds without page flickering
-    const pollInterval = setInterval(silentSync, 6000);
-
-    // 4. Also listen to SSE stream if available (for real-time server push)
-    let eventSource: EventSource | null = null;
-    try {
-      eventSource = new EventSource('/api/products/stream');
-      eventSource.onmessage = (event) => {
-        if (!isMounted) return;
-        try {
-          const liveProducts: Product[] = JSON.parse(event.data);
-          if (Array.isArray(liveProducts)) {
-            const genuine = liveProducts.filter((p) => !isDemoOrTestProduct(p));
-            setProducts((current) => {
-              const map = new Map<string, Product>();
-              for (const p of genuine) map.set(p.id, p);
-              for (const p of current) {
-                if (!isDemoOrTestProduct(p) && !map.has(p.id)) {
-                  map.set(p.id, p);
-                }
-              }
-              const merged = Array.from(map.values());
-              if (JSON.stringify(current) !== JSON.stringify(merged)) {
-                return merged;
-              }
-              return current;
-            });
-          }
-        } catch {
-          // ignore keepalive
-        }
-      };
-      eventSource.onerror = () => {};
-    } catch {
-      // Handled by background polling
-    }
+    const pollInterval = setInterval(silentSync, 10000);
 
     return () => {
       isMounted = false;
+      unsubscribeSupabase();
       clearInterval(pollInterval);
       window.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('focus', silentSync);
-      if (eventSource) {
-        eventSource.close();
-      }
     };
   }, []);
 
@@ -778,7 +776,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     // 3. Persist to shared online cloud database & local API
     try {
-      await publishProductToCloud(newProduct);
+      await publishProductToCloud(newProduct, user?.id);
     } catch (err: any) {
       console.warn('Cloud persistence warning, product safely kept in local shop catalog:', err);
     }
@@ -971,6 +969,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return true;
   };
 
+  const submitReport = async (report: {
+    reportedProductId?: string;
+    reportedSellerEmail?: string;
+    reporterEmail?: string;
+    reason: string;
+    details?: string;
+  }): Promise<boolean> => {
+    return await submitUserReportToSupabase({
+      ...report,
+      reporterEmail: report.reporterEmail || user?.email || undefined,
+    });
+  };
+
+  const submitSupportMessage = async (support: {
+    userName: string;
+    userEmail: string;
+    userPhone?: string;
+    subject: string;
+    message: string;
+  }): Promise<boolean> => {
+    return await submitSupportMessageToSupabase(support);
+  };
+
   const openCreateProductModal = (prodToEdit?: Product) => {
     if (prodToEdit && !isProductOwner(prodToEdit)) {
       alert("You cannot edit this product because it was published by another seller.");
@@ -1117,7 +1138,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         myActiveListingsCount,
         myLowStockCount,
         myOutOfStockCount,
-        isProductOwner
+        isProductOwner,
+        submitReport,
+        submitSupportMessage
       }}
     >
       {children}

@@ -14,6 +14,7 @@ import {
 import { ProductCategory, ProductCondition, RegionGhana } from '../../types';
 import { GHANA_REGIONS, CATEGORIES_WITH_META } from '../../data/initialProducts';
 import { compressImageFile } from '../../utils/imageCompressor';
+import { uploadProductImageToStorage } from '../../services/productDatabase';
 
 export const ProductFormModal: React.FC = () => {
   const {
@@ -100,7 +101,7 @@ export const ProductFormModal: React.FC = () => {
 
   if (!isCreateProductModalOpen) return null;
 
-  // Handle image upload from computer / phone camera with automatic client-side compression
+  // Handle image upload with Supabase Storage and fallback compression
   const handleImageFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
@@ -110,20 +111,27 @@ export const ProductFormModal: React.FC = () => {
     setSaveError(null);
 
     try {
-      const compressedList: string[] = [];
+      const processedList: string[] = [];
       for (const file of Array.from(files)) {
-        const compressed = await compressImageFile(file, {
-          maxWidth: 900,
-          maxHeight: 900,
-          quality: 0.75
-        });
-        compressedList.push(compressed);
+        try {
+          // Attempt Supabase Storage direct upload
+          const storageUrl = await uploadProductImageToStorage(file);
+          processedList.push(storageUrl);
+        } catch {
+          // Fallback to client-side compression
+          const compressed = await compressImageFile(file, {
+            maxWidth: 900,
+            maxHeight: 900,
+            quality: 0.75
+          });
+          processedList.push(compressed);
+        }
       }
-      setImages((prev) => [...prev, ...compressedList].slice(0, 5));
-      setImageNotice('Images optimized for cross-device loading.');
+      setImages((prev) => [...prev, ...processedList].slice(0, 5));
+      setImageNotice('Images ready & optimized.');
       setTimeout(() => setImageNotice(null), 3000);
     } catch (err: any) {
-      console.error('Image compression error:', err);
+      console.error('Image upload error:', err);
       setSaveError('Failed to process image. Please try a different photo.');
     } finally {
       setIsCompressingImage(false);

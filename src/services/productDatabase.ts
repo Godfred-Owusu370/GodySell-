@@ -1,11 +1,13 @@
-import { Product } from '../types';
+import { Product } from '../types/index';
+import {
+  getSupabase,
+  isSupabaseConfigured,
+  mapRowToProduct,
+  mapProductToRow
+} from './supabase';
+import { compressImageFile } from '../utils/imageCompressor';
 
-// Dual-Cloud Resilient Central Database Adapter for GodySell Ghana Marketplace
-// Synchronizes all published listings across all accounts, devices, and Vercel deployments
-export const PRIMARY_CLOUD_DB_URL = 'https://extendsclass.com/api/json-storage/bin/abfaaea';
-export const BACKUP_CLOUD_DB_URL = 'https://extendsclass.com/api/json-storage/bin/adabcaa';
 const LOCAL_STORAGE_KEY = 'godysell_shared_products_cache';
-const FETCH_TIMEOUT_MS = 7000;
 
 function getLocalItem(key: string): string | null {
   try {
@@ -22,20 +24,6 @@ function setLocalItem(key: string, value: string): void {
       window.localStorage.setItem(key, value);
     }
   } catch {}
-}
-
-/**
- * Perform a fetch with a strict timeout to prevent hung requests
- */
-async function fetchWithTimeout(url: string, options: RequestInit = {}): Promise<Response> {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-  try {
-    const res = await fetch(url, { ...options, signal: controller.signal });
-    return res;
-  } finally {
-    clearTimeout(timeoutId);
-  }
 }
 
 /**
@@ -58,90 +46,155 @@ export function filterGenuineProducts(products: any[]): Product[] {
 }
 
 /**
- * Fetch all shared products from the online persistent cloud database
+ * Upload product photo to Supabase Storage with graceful fallback
  */
-export async function fetchOnlineProducts(): Promise<Product[]> {
-  const t = Date.now();
-  const remoteMap = new Map<string, Product>();
+export async function uploadProductImageToStorage(file: File): Promise<string> {
+  const sb = getSupabase();
 
-  // 1. Try Local / Vercel API endpoint (fastest, same-origin)
-  if (typeof window !== 'undefined') {
-    try {
-      const localRes = await fetchWithTimeout(`/api/products?t=${t}`, {
-        cache: 'no-store',
-        headers: { 'Cache-Control': 'no-cache, no-store', 'Accept': 'application/json' }
-      });
-      if (localRes.ok) {
-        const localProducts = await localRes.json();
-        if (Array.isArray(localProducts)) {
-          const genuine = filterGenuineProducts(localProducts);
-          for (const p of genuine) remoteMap.set(p.id, p);
-        }
-      }
-    } catch {
-      // Fallback
-    }
+  // Validate format
+  const validMimes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+  if (file.type && !validMimes.includes(file.type)) {
+    throw new Error('Unsupported image format. Please use JPG, PNG, or WebP.');
   }
 
-  // 2. Try Primary Cloud Database with cache-busting
-  try {
-    const res = await fetchWithTimeout(`${PRIMARY_CLOUD_DB_URL}?t=${t}`, {
-      method: 'GET',
-      cache: 'no-store',
-      headers: { 'Accept': 'application/json', 'Cache-Control': 'no-cache, no-store' }
-    });
-
-    if (res.ok) {
-      const result = await res.json();
-      const rawProducts: Product[] = Array.isArray(result?.products)
-        ? result.products
-        : Array.isArray(result?.data?.products)
-        ? result.data.products
-        : [];
-
-      const genuine = filterGenuineProducts(rawProducts);
-      for (const p of genuine) {
-        if (!remoteMap.has(p.id)) remoteMap.set(p.id, p);
-      }
-    }
-  } catch (err) {
-    console.warn('Primary cloud DB fetch failed, attempting backup endpoint:', err);
+  // Validate size (10MB max)
+  if (file.size > 10 * 1024 * 1024) {
+    throw new Error('Image size exceeds 10MB limit. Please choose a smaller photo.');
   }
 
-  // 3. Try Secondary / Backup Cloud Database if still empty
-  if (remoteMap.size === 0) {
+  // 1. If Supabase is connected, upload to 'product-images' bucket
+  if (sb) {
     try {
-      const res = await fetchWithTimeout(`${BACKUP_CLOUD_DB_URL}?t=${t}`, {
-        method: 'GET',
-        cache: 'no-store',
-        headers: { 'Accept': 'application/json', 'Cache-Control': 'no-cache, no-store' }
-      });
+      const cleanName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_');
+      const filePath = `products/${Date.now()}_${Math.random().toString(36).slice(2, 7)}_${cleanName}`;
 
-      if (res.ok) {
-        const result = await res.json();
-        const rawProducts: Product[] = Array.isArray(result?.products)
-          ? result.products
-          : Array.isArray(result?.data?.products)
-          ? result.data.products
-          : [];
+      const { error: uploadError } = await sb.storage
+        .from('product-images')
+        .upload(filePath, file, {
+          contentType: file.type || 'image/jpeg',
+          upsert: true,
+        });
 
-        const genuine = filterGenuineProducts(rawProducts);
-        for (const p of genuine) {
-          if (!remoteMap.has(p.id)) remoteMap.set(p.id, p);
+      if (!uploadError) {
+        const { data: publicData } = sb.storage
+          .from('product-images')
+          .getPublicUrl(filePath);
+
+        if (publicData?.publicUrl) {
+          return publicData.publicUrl;
         }
+      } else {
+        console.warn('Supabase Storage upload notice, using optimized client compression:', uploadError.message);
       }
     } catch (err) {
-      console.warn('Backup cloud DB fetch failed:', err);
+      console.warn('Supabase Storage exception, using client compression:', err);
     }
   }
 
-  const combined = Array.from(remoteMap.values());
-  if (combined.length > 0) {
-    setLocalItem(LOCAL_STORAGE_KEY, JSON.stringify(combined));
-    return combined;
+  // 2. Reliable Fallback: client-side image compression
+  return await compressImageFile(file, {
+    maxWidth: 900,
+    maxHeight: 900,
+    quality: 0.75,
+  });
+}
+
+/**
+ * Real-time Supabase subscription
+ * Triggers onUpdate immediately when any seller on any device publishes, edits, or deletes a product
+ */
+export function subscribeToSupabaseProducts(
+  onUpdate: (products: Product[]) => void,
+  onError?: (error: Error) => void
+): () => void {
+  const sb = getSupabase();
+
+  if (!sb) {
+    // If Supabase not configured yet, no-op unsubscribe
+    return () => {};
   }
 
-  // 4. Fallback to LocalStorage cache
+  try {
+    const channel = sb
+      .channel('godysell-realtime-products')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'products' },
+        async () => {
+          // Whenever a change occurs, fetch fresh catalog
+          try {
+            const fresh = await fetchOnlineProducts();
+            onUpdate(fresh);
+          } catch (err: any) {
+            if (onError) onError(err);
+          }
+        }
+      )
+      .subscribe((status, err) => {
+        if (err) {
+          console.warn('Supabase Realtime subscription notice:', err.message);
+          if (onError) onError(err);
+        }
+      });
+
+    return () => {
+      try {
+        sb.removeChannel(channel);
+      } catch {}
+    };
+  } catch (err: any) {
+    console.warn('Could not attach Supabase Realtime channel:', err);
+    return () => {};
+  }
+}
+
+// Backwards-compatible alias for existing imports
+export const subscribeToFirestoreProducts = subscribeToSupabaseProducts;
+
+/**
+ * Fetch all shared products from Supabase (Primary) with resilient fallbacks
+ */
+export async function fetchOnlineProducts(): Promise<Product[]> {
+  const sb = getSupabase();
+
+  // 1. Primary: Cloud Supabase PostgreSQL Database
+  if (sb) {
+    try {
+      const { data, error } = await sb
+        .from('products')
+        .select('*')
+        .neq('status', 'archived')
+        .order('created_at', { ascending: false });
+
+      if (!error && Array.isArray(data)) {
+        const mapped = data.map(mapRowToProduct);
+        const genuine = filterGenuineProducts(mapped);
+        setLocalItem(LOCAL_STORAGE_KEY, JSON.stringify(genuine));
+        return genuine;
+      } else if (error) {
+        console.warn('Supabase fetch notice, trying API fallback:', error.message);
+      }
+    } catch (err) {
+      console.warn('Supabase connection warning, falling back to local API:', err);
+    }
+  }
+
+  // 2. Secondary: Local / Vercel API endpoint
+  if (typeof window !== 'undefined') {
+    try {
+      const res = await fetch(`/api/products?t=${Date.now()}`, { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data) && data.length > 0) {
+          const genuine = filterGenuineProducts(data);
+          setLocalItem(LOCAL_STORAGE_KEY, JSON.stringify(genuine));
+          return genuine;
+        }
+      }
+    } catch {}
+  }
+
+  // 3. Tertiary: LocalStorage cache
   const cached = getLocalItem(LOCAL_STORAGE_KEY);
   if (cached) {
     try {
@@ -158,134 +211,134 @@ export async function fetchOnlineProducts(): Promise<Product[]> {
 }
 
 /**
- * Save the entire catalog to the persistent online cloud database
+ * Publish a new product to Supabase Database
+ * Reflects across all devices and browsers in real-time
  */
-export async function syncCatalogToCloud(products: Product[]): Promise<boolean> {
-  const genuineOnly = filterGenuineProducts(products);
-  // Update cache immediately
-  setLocalItem(LOCAL_STORAGE_KEY, JSON.stringify(genuineOnly));
+export async function publishProductToCloud(product: Product, userId?: string | null): Promise<Product[]> {
+  const genuineOnly = filterGenuineProducts([product]);
+  if (genuineOnly.length === 0) return [];
 
-  const payload = JSON.stringify({ products: genuineOnly });
+  // Update local cache immediately
+  const cachedStr = getLocalItem(LOCAL_STORAGE_KEY);
+  const currentCached: Product[] = cachedStr ? JSON.parse(cachedStr) : [];
+  const updatedList = [product, ...currentCached.filter((p) => p.id !== product.id)];
+  setLocalItem(LOCAL_STORAGE_KEY, JSON.stringify(updatedList));
 
-  // 1. In browser, use /api/products (same-origin, proxies to cloud DB with no browser CORS preflight issue)
-  if (typeof window !== 'undefined') {
+  // 1. Primary: Save directly to Supabase PostgreSQL database
+  const sb = getSupabase();
+  if (sb) {
     try {
-      await fetchWithTimeout('/api/products', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: payload
-      });
-    } catch (e: any) {
-      console.warn('/api/products sync failed:', e);
+      const row = mapProductToRow(product, userId);
+      const { error } = await sb
+        .from('products')
+        .upsert(row, { onConflict: 'id' });
+
+      if (error) {
+        console.error('Supabase product publish error:', error.message);
+        throw new Error(error.message);
+      }
+    } catch (err: any) {
+      console.warn('Supabase product publish exception, forwarding to API:', err.message);
+      // Fall through to API save
     }
   }
 
-  // 2. Direct Cloud Database (dual write ensures immediate global replication)
-  try {
-    await fetchWithTimeout(PRIMARY_CLOUD_DB_URL, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: payload
-    });
-  } catch (err: any) {
-    console.warn('Primary cloud sync warning:', err);
-  }
-
-  // 3. Backup Cloud Database
-  try {
-    await fetchWithTimeout(BACKUP_CLOUD_DB_URL, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: payload
-    });
-  } catch (backupErr) {
-    console.warn('Backup cloud DB sync warning:', backupErr);
-  }
-
-  return true;
-}
-
-/**
- * Publish a new product to the shared online database
- */
-export async function publishProductToCloud(product: Product): Promise<Product[]> {
-  const current = await fetchOnlineProducts().catch(() => []);
-  const updated = [product, ...current.filter((p) => p.id !== product.id)];
-  setLocalItem(LOCAL_STORAGE_KEY, JSON.stringify(updated));
-
-  // 1. Post to /api/products
+  // 2. Also notify local / Vercel API endpoint
   if (typeof window !== 'undefined') {
-    try {
-      await fetchWithTimeout('/api/products', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(product)
-      });
-    } catch (err) {
-      console.warn('POST /api/products warning:', err);
-    }
+    fetch('/api/products', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(product),
+    }).catch(() => {});
   }
 
-  // 2. Direct Cloud Sync (ensures all devices querying ExtendsClass receive it)
-  try {
-    await syncCatalogToCloud(updated);
-  } catch (err) {
-    console.warn('Direct cloud sync warning:', err);
-  }
-
-  return updated;
+  return updatedList;
 }
 
 /**
- * Update an existing product in the shared online database
+ * Update an existing product in Supabase
  */
 export async function updateProductInCloud(productId: string, updates: Partial<Product>): Promise<Product[]> {
-  if (typeof window !== 'undefined') {
+  const sb = getSupabase();
+
+  if (sb) {
     try {
-      const res = await fetchWithTimeout(`/api/products?id=${encodeURIComponent(productId)}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(updates)
-      });
-      if (res.ok) {
-        const current = await fetchOnlineProducts().catch(() => []);
-        const updated = current.map((p) => (p.id === productId ? { ...p, ...updates } : p));
-        setLocalItem(LOCAL_STORAGE_KEY, JSON.stringify(updated));
-        return updated;
+      const updateData: any = { updated_at: new Date().toISOString() };
+      if (updates.title !== undefined) updateData.title = updates.title;
+      if (updates.price !== undefined) updateData.price = updates.price;
+      if (updates.category !== undefined) updateData.category = updates.category;
+      if (updates.subcategory !== undefined) updateData.subcategory = updates.subcategory;
+      if (updates.region !== undefined) updateData.region = updates.region;
+      if (updates.city !== undefined) updateData.city = updates.city;
+      if (updates.condition !== undefined) updateData.condition = updates.condition;
+      if (updates.images !== undefined) updateData.images = updates.images;
+      if (updates.description !== undefined) updateData.description = updates.description;
+      if (updates.stock !== undefined) updateData.stock = updates.stock;
+      if (updates.status !== undefined) updateData.status = updates.status;
+      if (updates.negotiable !== undefined) updateData.negotiable = updates.negotiable;
+
+      const { error } = await sb
+        .from('products')
+        .update(updateData)
+        .eq('id', productId);
+
+      if (error) {
+        console.warn('Supabase update notice:', error.message);
       }
-    } catch {
-      // Fallback
+    } catch (err) {
+      console.warn('Supabase update error:', err);
     }
   }
 
-  const current = await fetchOnlineProducts();
+  if (typeof window !== 'undefined') {
+    fetch(`/api/products?id=${encodeURIComponent(productId)}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    }).catch(() => {});
+  }
+
+  const current = await fetchOnlineProducts().catch(() => []);
   const updated = current.map((p) => (p.id === productId ? { ...p, ...updates } : p));
-  await syncCatalogToCloud(updated);
+  setLocalItem(LOCAL_STORAGE_KEY, JSON.stringify(updated));
   return updated;
 }
 
 /**
- * Delete a product from the shared online database
+ * Delete a product from Supabase
  */
 export async function deleteProductFromCloud(productId: string): Promise<Product[]> {
-  if (typeof window !== 'undefined') {
+  const sb = getSupabase();
+
+  if (sb) {
     try {
-      const res = await fetchWithTimeout(`/api/products?id=${encodeURIComponent(productId)}`, {
-        method: 'DELETE'
-      });
-      if (res.ok) {
-        const current = await fetchOnlineProducts().catch(() => []);
-        const updated = current.filter((p) => p.id !== productId);
-        setLocalItem(LOCAL_STORAGE_KEY, JSON.stringify(updated));
-        return updated;
+      // Mark as archived first to immediately hide from all queries and public shop
+      await sb
+        .from('products')
+        .update({ status: 'archived', updated_at: new Date().toISOString() })
+        .eq('id', productId);
+
+      const { error } = await sb
+        .from('products')
+        .delete()
+        .eq('id', productId);
+
+      if (error) {
+        console.warn('Supabase delete notice:', error.message);
       }
-    } catch {
-      // Fallback
+    } catch (err) {
+      console.warn('Supabase delete error:', err);
     }
   }
 
-  const current = await fetchOnlineProducts();
+  if (typeof window !== 'undefined') {
+    fetch(`/api/products?id=${encodeURIComponent(productId)}`, {
+      method: 'DELETE',
+    }).catch(() => {});
+  }
+
+  const current = await fetchOnlineProducts().catch(() => []);
   const updated = current.filter((p) => p.id !== productId);
-  await syncCatalogToCloud(updated);
+  setLocalItem(LOCAL_STORAGE_KEY, JSON.stringify(updated));
   return updated;
 }

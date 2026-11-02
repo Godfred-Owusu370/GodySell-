@@ -1,0 +1,141 @@
+{
+  "entities": {
+    "Product": {
+      "title": "Product",
+      "description": "A marketplace listing published on GodySell Ghana",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the product listing",
+          "maxLength": 128
+        },
+        "title": {
+          "type": "string",
+          "description": "Title of the item being sold",
+          "maxLength": 150
+        },
+        "price": {
+          "type": "number",
+          "description": "Price in Ghana Cedis (GH₵)"
+        },
+        "category": {
+          "type": "string",
+          "description": "Marketplace category name",
+          "maxLength": 80
+        },
+        "subcategory": {
+          "type": "string",
+          "description": "Subcategory name",
+          "maxLength": 80
+        },
+        "region": {
+          "type": "string",
+          "description": "Ghana region where the item is located",
+          "maxLength": 50
+        },
+        "city": {
+          "type": "string",
+          "description": "Town or neighborhood in Ghana",
+          "maxLength": 80
+        },
+        "condition": {
+          "type": "string",
+          "description": "Physical condition of the item",
+          "enum": ["Brand New", "Foreign Used", "Local Used", "Refurbished"]
+        },
+        "images": {
+          "type": "array",
+          "description": "URLs of product images hosted on Firebase Storage or CDN"
+        },
+        "description": {
+          "type": "string",
+          "description": "Item specifications, details, and seller notes",
+          "maxLength": 3000
+        },
+        "negotiable": {
+          "type": "boolean",
+          "description": "Whether the seller accepts price negotiations"
+        },
+        "verifiedSeller": {
+          "type": "boolean",
+          "description": "Whether the seller is a verified vendor"
+        },
+        "sellerName": {
+          "type": "string",
+          "description": "Display name of the seller or shop",
+          "maxLength": 100
+        },
+        "sellerPhone": {
+          "type": "string",
+          "description": "Ghana contact phone number for WhatsApp / direct calls",
+          "maxLength": 35
+        },
+        "sellerEmail": {
+          "type": "string",
+          "description": "Email address of the seller account",
+          "maxLength": 120
+        },
+        "sellerMemberSince": {
+          "type": "string",
+          "description": "Membership joining date",
+          "maxLength": 30
+        },
+        "sellerRating": {
+          "type": "number",
+          "description": "Average review rating (1 to 5)"
+        },
+        "sellerReviewCount": {
+          "type": "number",
+          "description": "Total review count"
+        },
+        "stock": {
+          "type": "number",
+          "description": "Available stock quantity"
+        },
+        "sku": {
+          "type": "string",
+          "description": "Stock Keeping Unit",
+          "maxLength": 50
+        },
+        "status": {
+          "type": "string",
+          "description": "Listing status",
+          "enum": ["active", "paused", "boosted"]
+        },
+        "views": {
+          "type": "number",
+          "description": "Total view count"
+        },
+        "inquiries": {
+          "type": "number",
+          "description": "Number of buyer chats or inquiries"
+        },
+        "salesCount": {
+          "type": "number",
+          "description": "Number of recorded sales"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "ISO timestamp when the listing was published",
+          "maxLength": 50
+        },
+        "featured": {
+          "type": "boolean",
+          "description": "Whether featured on marketplace homepage"
+        },
+        "specifications": {
+          "type": "object",
+          "description": "Key-value map of technical specifications"
+        }
+      },
+      "required": ["id", "title", "price", "category", "region", "sellerName", "sellerPhone"]
+    }
+  },
+  "firestore": {
+    "/products/{productId}": {
+      "schema": "Product",
+      "description": "Shared marketplace product listings collection accessible across all devices"
+    }
+  }
+}

@@ -22,6 +22,12 @@ if (!fs.existsSync(DATA_FILE)) {
 const PRIMARY_CLOUD_DB_URL = 'https://extendsclass.com/api/json-storage/bin/abfaaea';
 const BACKUP_CLOUD_DB_URL = 'https://extendsclass.com/api/json-storage/bin/adabcaa';
 
+const DEFAULT_SUPABASE_URL = 'https://pqktfgsxgaslyngffwxo.supabase.co';
+const DEFAULT_SUPABASE_KEY = 'sb_publishable_q30L3DUFiJq7MQUOvYUadQ_ThPuF6BO';
+
+const SUPABASE_URL = process.env.VITE_SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || DEFAULT_SUPABASE_URL;
+const SUPABASE_KEY = process.env.VITE_SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || DEFAULT_SUPABASE_KEY;
+
 function isRealProduct(p: any): boolean {
   if (!p) return false;
   const id = String(p.id || '');
@@ -32,6 +38,56 @@ function isRealProduct(p: any): boolean {
 }
 
 async function fetchFromCloudRemote(): Promise<any[]> {
+  // 1. Try Supabase REST API if configured
+  if (SUPABASE_URL && SUPABASE_KEY && SUPABASE_URL.startsWith('https://')) {
+    try {
+      const sbRes = await fetch(`${SUPABASE_URL}/rest/v1/products?select=*&status=neq.archived&order=created_at.desc`, {
+        headers: {
+          apikey: SUPABASE_KEY,
+          Authorization: `Bearer ${SUPABASE_KEY}`,
+          'Cache-Control': 'no-cache, no-store'
+        }
+      });
+      if (sbRes.ok) {
+        const rows: any = await sbRes.json();
+        if (Array.isArray(rows) && rows.length > 0) {
+          return rows.map((r: any) => ({
+            id: String(r.id),
+            title: r.title,
+            price: Number(r.price),
+            category: r.category,
+            subcategory: r.subcategory || '',
+            region: r.region,
+            city: r.city,
+            condition: r.condition,
+            images: Array.isArray(r.images) ? r.images : [],
+            description: r.description || '',
+            negotiable: Boolean(r.negotiable),
+            verifiedSeller: Boolean(r.verified_seller ?? true),
+            sellerName: r.seller_name || 'Seller',
+            sellerPhone: r.seller_phone || '+233(0)592836664',
+            sellerEmail: r.seller_email || '',
+            sellerMemberSince: r.seller_member_since || 'Sep 2024',
+            sellerRating: Number(r.seller_rating) || 5.0,
+            sellerReviewCount: Number(r.seller_review_count) || 1,
+            stock: Number(r.stock) || 1,
+            sku: r.sku || `SKU-${r.id}`,
+            status: r.status || 'active',
+            views: Number(r.views) || 1,
+            inquiries: Number(r.inquiries) || 0,
+            salesCount: Number(r.sales_count) || 0,
+            createdAt: r.created_at || new Date().toISOString(),
+            featured: Boolean(r.featured),
+            specifications: r.specifications || {},
+          })).filter(isRealProduct);
+        }
+      }
+    } catch (e) {
+      console.warn('Server: Supabase fetch notice:', e);
+    }
+  }
+
+  // 2. Resilient fallback to JSON cloud storage
   const cacheBuster = `?t=${Date.now()}`;
   try {
     const res = await fetch(`${PRIMARY_CLOUD_DB_URL}${cacheBuster}`, {
@@ -66,6 +122,54 @@ async function fetchFromCloudRemote(): Promise<any[]> {
 
 async function pushToCloudRemote(products: any[]) {
   const clean = products.filter(isRealProduct);
+
+  if (SUPABASE_URL && SUPABASE_KEY && SUPABASE_URL.startsWith('https://')) {
+    try {
+      const rows = clean.map((p) => ({
+        id: p.id,
+        title: p.title,
+        price: p.price,
+        category: p.category,
+        subcategory: p.subcategory || '',
+        region: p.region,
+        city: p.city,
+        condition: p.condition,
+        images: p.images || [],
+        description: p.description || '',
+        negotiable: p.negotiable ?? true,
+        verified_seller: p.verifiedSeller ?? true,
+        seller_name: p.sellerName,
+        seller_phone: p.sellerPhone,
+        seller_email: p.sellerEmail || '',
+        seller_member_since: p.sellerMemberSince || 'Sep 2024',
+        seller_rating: p.sellerRating || 5.0,
+        seller_review_count: p.sellerReviewCount || 1,
+        stock: p.stock ?? 1,
+        sku: p.sku || `SKU-${p.id}`,
+        status: p.status || 'active',
+        views: p.views || 1,
+        inquiries: p.inquiries || 0,
+        sales_count: p.salesCount || 0,
+        featured: p.featured ?? false,
+        specifications: p.specifications || {},
+        updated_at: new Date().toISOString(),
+      }));
+
+      await fetch(`${SUPABASE_URL}/rest/v1/products`, {
+        method: 'POST',
+        headers: {
+          apikey: SUPABASE_KEY,
+          Authorization: `Bearer ${SUPABASE_KEY}`,
+          'Content-Type': 'application/json',
+          Prefer: 'resolution=merge-duplicates',
+        },
+        body: JSON.stringify(rows),
+      });
+    } catch (e) {
+      console.warn('Server: Supabase push notice:', e);
+    }
+  }
+
   const payload = JSON.stringify({ products: clean });
   try {
     await fetch(PRIMARY_CLOUD_DB_URL, {
@@ -271,6 +375,7 @@ app.put('/api/products/:id', (req: Request, res: Response) => {
     products[index] = { ...products[index], ...updates };
     writeProducts(products);
     broadcastProducts(products);
+    pushToCloudRemote(products).catch(() => {});
 
     res.json(products[index]);
   } catch (error) {
@@ -287,6 +392,17 @@ app.delete('/api/products/:id', (req: Request, res: Response) => {
 
     writeProducts(updated);
     broadcastProducts(updated);
+    pushToCloudRemote(updated).catch(() => {});
+
+    if (SUPABASE_URL && SUPABASE_KEY && SUPABASE_URL.startsWith('https://')) {
+      fetch(`${SUPABASE_URL}/rest/v1/products?id=eq.${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        headers: {
+          apikey: SUPABASE_KEY,
+          Authorization: `Bearer ${SUPABASE_KEY}`,
+        },
+      }).catch(() => {});
+    }
 
     res.json({ success: true, id });
   } catch (error) {
