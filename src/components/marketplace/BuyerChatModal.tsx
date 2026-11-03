@@ -16,7 +16,7 @@ export const BuyerChatModal: React.FC = () => {
   const [message, setMessage] = useState('');
   const [offerPrice, setOfferPrice] = useState('');
   const [senderName, setSenderName] = useState(user?.name || '');
-  const [senderPhone, setSenderPhone] = useState(user?.phone || '+233(0)592836664');
+  const [senderPhone, setSenderPhone] = useState(user?.phone || '');
   const [sentSuccess, setSentSuccess] = useState(false);
 
   if (!isChatModalOpen || !chatProduct) return null;
@@ -33,7 +33,7 @@ export const BuyerChatModal: React.FC = () => {
       productId: chatProduct.id,
       productTitle: chatProduct.title,
       senderName: senderName || user?.name || 'Ghana Buyer',
-      senderPhone: senderPhone || user?.phone || '+233 24 000 1122',
+      senderPhone: senderPhone || user?.phone || '',
       message: msgText,
       offeredPrice: numericOffer
     });
@@ -145,7 +145,7 @@ export const BuyerChatModal: React.FC = () => {
                 <input
                   type="tel"
                   required
-                  placeholder="+233(0)592836664"
+                  placeholder="e.g. 0244123456"
                   value={senderPhone}
                   onChange={(e) => setSenderPhone(e.target.value)}
                   className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-emerald-600"

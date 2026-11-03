@@ -9,6 +9,8 @@ interface GoogleAccountItem {
   name: string;
   email: string;
   picture: string;
+  memberSince?: string;
+  phone?: string;
 }
 
 export const GoogleLoginWall: React.FC = () => {
@@ -61,7 +63,9 @@ export const GoogleLoginWall: React.FC = () => {
       loginWithGoogle({
         name: account.name,
         email: account.email,
-        picture: account.picture
+        picture: account.picture,
+        memberSince: '2026',
+        phone: account.phone
       });
       setIsLoading(false);
     }, 450);
@@ -85,7 +89,9 @@ export const GoogleLoginWall: React.FC = () => {
       id: `acc-${Date.now()}`,
       name,
       email,
-      picture
+      picture,
+      memberSince: '2026',
+      phone: ''
     };
 
     const updated = [newAcc, ...accounts.filter((a) => a.email.toLowerCase() !== email)];

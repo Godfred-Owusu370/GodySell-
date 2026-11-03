@@ -75,9 +75,9 @@ export function mapRowToProduct(row: any): Product {
     negotiable: Boolean(row.negotiable),
     verifiedSeller: Boolean(row.verified_seller ?? true),
     sellerName: row.seller_name || 'Verified Seller',
-    sellerPhone: row.seller_phone || '+233(0)592836664',
+    sellerPhone: row.seller_phone || '',
     sellerEmail: row.seller_email || '',
-    sellerMemberSince: row.seller_member_since || 'Sep 2024',
+    sellerMemberSince: (!row.seller_member_since || String(row.seller_member_since).includes('2024')) ? '2026' : String(row.seller_member_since),
     sellerRating: Number(row.seller_rating) || 5.0,
     sellerReviewCount: Number(row.seller_review_count) || 1,
     stock: Number(row.stock) || 1,
@@ -110,9 +110,9 @@ export function mapProductToRow(product: Product, userId?: string | null): any {
     negotiable: product.negotiable ?? true,
     verified_seller: product.verifiedSeller ?? true,
     seller_name: product.sellerName,
-    seller_phone: product.sellerPhone,
+    seller_phone: product.sellerPhone || '',
     seller_email: product.sellerEmail || '',
-    seller_member_since: product.sellerMemberSince || 'Sep 2024',
+    seller_member_since: (!product.sellerMemberSince || String(product.sellerMemberSince).includes('2024')) ? '2026' : String(product.sellerMemberSince),
     seller_rating: product.sellerRating || 5.0,
     seller_review_count: product.sellerReviewCount || 1,
     stock: product.stock ?? 1,
@@ -137,25 +137,114 @@ export async function syncUserProfileToSupabase(profile: UserProfile): Promise<v
   if (!sb) return;
 
   try {
-    const { error } = await sb.from('profiles').upsert(
-      {
-        id: profile.id,
-        name: profile.name,
-        email: profile.email.toLowerCase().trim(),
-        picture: profile.picture || null,
-        phone: profile.phone || null,
-        region: profile.region || 'Greater Accra',
-        is_verified: profile.isVerified ?? true,
-        member_since: profile.memberSince || 'Sep 2024',
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: 'email' }
-    );
+    const payload: any = {
+      id: profile.id,
+      name: profile.name,
+      email: profile.email.toLowerCase().trim(),
+      picture: profile.picture || null,
+      region: profile.region || 'Greater Accra',
+      is_verified: profile.isVerified ?? true,
+      member_since: (!profile.memberSince || String(profile.memberSince).includes('2024')) ? '2026' : String(profile.memberSince),
+      updated_at: new Date().toISOString(),
+    };
+    if (profile.phone) {
+      payload.phone = profile.phone;
+    }
+
+    const { error } = await sb.from('profiles').upsert(payload, { onConflict: 'email' });
     if (error) {
       console.warn('Supabase profile sync notice:', error.message);
     }
   } catch (err) {
     console.warn('Supabase profile sync error:', err);
+  }
+}
+
+/**
+ * Fetch existing user profile from Supabase profiles table
+ */
+export async function fetchUserProfileFromSupabase(email: string): Promise<Partial<UserProfile> | null> {
+  const sb = getSupabase();
+  if (!sb || !email) return null;
+
+  try {
+    const { data, error } = await sb
+      .from('profiles')
+      .select('*')
+      .eq('email', email.toLowerCase().trim())
+      .maybeSingle();
+
+    if (!error && data) {
+      return {
+        id: data.id,
+        name: data.name,
+        email: data.email,
+        picture: data.picture,
+        phone: data.phone || '',
+        region: data.region || 'Greater Accra',
+        isVerified: data.is_verified ?? true,
+        memberSince: (!data.member_since || String(data.member_since).includes('2024')) ? '2026' : String(data.member_since),
+      };
+    }
+  } catch (err) {
+    console.warn('Error fetching profile from Supabase:', err);
+  }
+  return null;
+}
+
+/**
+ * Automatically upgrades any legacy 2024 membership years to 2026 in the Supabase database.
+ */
+export async function upgradeLegacyMemberSinceInDatabase(): Promise<void> {
+  const sb = getSupabase();
+  if (!sb) return;
+  try {
+    // 1. Upgrade products where seller_member_since contains 2024 or is 2024 or V-istore / V-store
+    await sb
+      .from('products')
+      .update({ seller_member_since: '2026' })
+      .or('seller_member_since.eq.2024,seller_member_since.ilike.%2024%,seller_name.ilike.%V-store%,seller_name.ilike.%V-istore%');
+
+    // 2. Upgrade profiles where member_since contains 2024
+    await sb
+      .from('profiles')
+      .update({ member_since: '2026' })
+      .or('member_since.eq.2024,member_since.ilike.%2024%');
+  } catch (err) {
+    console.warn('Notice upgrading legacy member_since:', err);
+  }
+}
+
+/**
+ * Updates seller contact phone across all products published by this seller in Supabase
+ */
+export async function updateSellerContactAcrossAllProducts(
+  sellerEmail: string,
+  newPhone: string,
+  newName?: string
+): Promise<void> {
+  const sb = getSupabase();
+  if (!sb || !sellerEmail) return;
+
+  try {
+    const updates: any = {
+      seller_phone: newPhone,
+      updated_at: new Date().toISOString()
+    };
+    if (newName) {
+      updates.seller_name = newName;
+    }
+
+    const { error } = await sb
+      .from('products')
+      .update(updates)
+      .eq('seller_email', sellerEmail.toLowerCase().trim());
+
+    if (error) {
+      console.warn('Notice updating seller contact across products in Supabase:', error.message);
+    }
+  } catch (err) {
+    console.warn('Error updating seller contact across products:', err);
   }
 }
 

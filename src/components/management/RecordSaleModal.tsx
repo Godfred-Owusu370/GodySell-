@@ -149,7 +149,7 @@ export const RecordSaleModal: React.FC = () => {
                   <label className="block font-medium text-slate-700 mb-1">Buyer Phone</label>
                   <input
                     type="tel"
-                    placeholder="+233(0)592836664"
+                    placeholder="e.g. 0244123456"
                     value={buyerPhone}
                     onChange={(e) => setBuyerPhone(e.target.value)}
                     className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg focus:outline-none focus:border-emerald-600"

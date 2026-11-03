@@ -1,1 +1,135 @@
-[]
+[
+  {
+    "id": "prod-1793701052273-988",
+    "title": "Iphone 11",
+    "price": 2900,
+    "category": "Mobile Phones & Tablets",
+    "subcategory": "Mobile Phones",
+    "region": "Western",
+    "city": "Tarkwa",
+    "condition": "Brand New",
+    "images": [
+      "https://pqktfgsxgaslyngffwxo.supabase.co/storage/v1/object/public/product-images/products/1793700942892_490mb_iphone.jpg"
+    ],
+    "description": "Iphone 11 available for sale in Tarkwa, Western.",
+    "negotiable": false,
+    "verifiedSeller": true,
+    "sellerName": "V-istore",
+    "sellerPhone": "0502271106",
+    "sellerEmail": "veramensah997@gmail.com",
+    "sellerMemberSince": "2026",
+    "sellerRating": 5,
+    "sellerReviewCount": 1,
+    "stock": 3,
+    "sku": "SKU-7777",
+    "status": "active",
+    "views": 1,
+    "inquiries": 0,
+    "salesCount": 0,
+    "createdAt": "2026-11-03T10:17:32.273+00:00",
+    "featured": false,
+    "specifications": {
+      "iphone": "256GB"
+    }
+  },
+  {
+    "id": "prod-1793672645125-748",
+    "title": "Polo shirt",
+    "price": 200,
+    "category": "Fashion & Beauty",
+    "subcategory": "Clothing",
+    "region": "Western",
+    "city": "Bogoso, Cape coast",
+    "condition": "Brand New",
+    "images": [
+      "https://pqktfgsxgaslyngffwxo.supabase.co/storage/v1/object/public/product-images/products/1793672581844_j9nfm_8cbaed20-27ca-44d5-b1ca-cdee08c5828b.jpeg",
+      "https://pqktfgsxgaslyngffwxo.supabase.co/storage/v1/object/public/product-images/products/1793672583373_7b9p4_7393d405-7f8a-446f-9b6f-9d240a2262e2.jpeg",
+      "https://pqktfgsxgaslyngffwxo.supabase.co/storage/v1/object/public/product-images/products/1793672583957_59o0x_4e0ce428-569d-4a3b-91f9-59ceac6ade67.jpeg",
+      "https://pqktfgsxgaslyngffwxo.supabase.co/storage/v1/object/public/product-images/products/1793672584823_gcbwl_fcd29556-1751-4dd9-9f24-7f8c68adc42b.jpeg"
+    ],
+    "description": "Elite styles clothing brand",
+    "negotiable": true,
+    "verifiedSeller": true,
+    "sellerName": "Prince Johnson Asare Koduah",
+    "sellerPhone": "+233(0)592836664",
+    "sellerEmail": "princejohnsonasarekoduah@gmail.com",
+    "sellerMemberSince": "2026",
+    "sellerRating": 5,
+    "sellerReviewCount": 1,
+    "stock": 5,
+    "sku": "SKU-9500",
+    "status": "active",
+    "views": 1,
+    "inquiries": 0,
+    "salesCount": 0,
+    "createdAt": "2026-11-03T02:24:05.125+00:00",
+    "featured": false,
+    "specifications": {}
+  },
+  {
+    "id": "prod-1793635305212-296",
+    "title": "Laptop",
+    "price": 3500,
+    "category": "Electronics & Appliances",
+    "subcategory": "Laptops & Computers",
+    "region": "Greater Accra",
+    "city": "East Legon, Accra",
+    "condition": "Foreign Used",
+    "images": [
+      "https://pqktfgsxgaslyngffwxo.supabase.co/storage/v1/object/public/product-images/products/1793635236587_ynspj_IMG_3172.jpeg"
+    ],
+    "description": "Laptop available for sale in East Legon, Accra, Greater Accra.",
+    "negotiable": true,
+    "verifiedSeller": true,
+    "sellerName": "GODY ELECTRONICS",
+    "sellerPhone": "+233(0)592836664",
+    "sellerEmail": "godfredowusu870@gmail.com",
+    "sellerMemberSince": "2026",
+    "sellerRating": 5,
+    "sellerReviewCount": 1,
+    "stock": 5,
+    "sku": "SKU-7699",
+    "status": "active",
+    "views": 1,
+    "inquiries": 0,
+    "salesCount": 0,
+    "createdAt": "2026-11-02T16:01:45.213+00:00",
+    "featured": false,
+    "specifications": {
+      "HP Elite Book": "2TB"
+    }
+  },
+  {
+    "id": "prod-supa-1793632915828",
+    "title": "Samsung Galaxy S24 Ultra - East Legon",
+    "price": 13500,
+    "category": "Mobile Phones & Tablets",
+    "subcategory": "Mobile Phones",
+    "region": "Greater Accra",
+    "city": "East Legon, Accra",
+    "condition": "Brand New",
+    "images": [
+      "https://images.unsplash.com/photo-1610945415295-d9bbf067e59c?w=600&auto=format&fit=crop&q=80"
+    ],
+    "description": "Original in box with warranty",
+    "negotiable": true,
+    "verifiedSeller": true,
+    "sellerName": "Godfred Owusu",
+    "sellerPhone": "+233(0)592836664",
+    "sellerEmail": "godfredowusu370@gmail.com",
+    "sellerMemberSince": "2026",
+    "sellerRating": 5,
+    "sellerReviewCount": 1,
+    "stock": 3,
+    "sku": "SKU-S24U",
+    "status": "active",
+    "views": 1,
+    "inquiries": 0,
+    "salesCount": 0,
+    "createdAt": "2026-11-02T15:21:55.829+00:00",
+    "featured": false,
+    "specifications": {
+      "Model": "S24 Ultra"
+    }
+  }
+]

@@ -22,9 +22,13 @@ import {
 } from '../services/productDatabase';
 import {
   syncUserProfileToSupabase,
+  fetchUserProfileFromSupabase,
+  updateSellerContactAcrossAllProducts,
+  upgradeLegacyMemberSinceInDatabase,
   submitUserReportToSupabase,
   submitSupportMessageToSupabase
 } from '../services/supabase';
+import { formatMemberSinceYear } from '../utils/whatsapp';
 
 interface AppContextType {
   user: UserProfile | null;
@@ -134,8 +138,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         // If the stored picture was a generic unsplash stock photo, update it to their own email picture
         if (!saved.picture || saved.picture.includes('unsplash.com')) {
           saved.picture = getEmailProfilePhoto(saved.email);
-          localStorage.setItem('godysell_user', JSON.stringify(saved));
         }
+        // Upgrade all logged in users to 2026 per platform standard
+        saved.memberSince = '2026';
+        localStorage.setItem('godysell_user', JSON.stringify(saved));
         return saved;
       }
     } catch (e) {
@@ -158,20 +164,41 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const resolvedName = profile.name?.trim() || autoName;
     const resolvedPicture = profile.picture || getEmailProfilePhoto(email);
 
+    // Standardize membership year to 2026
+    const resolvedMemberSince = '2026';
+    const resolvedPhone = profile.phone ? profile.phone.trim() : '';
+
     const newUser: UserProfile = {
       id: profile.id || `usr-${Date.now().toString().slice(-4)}`,
       name: resolvedName,
       email: email,
       picture: resolvedPicture,
-      phone: profile.phone || '+233(0)592836664',
+      phone: resolvedPhone,
       region: profile.region || 'Greater Accra',
       isVerified: true,
-      memberSince: 'Sep 2024'
+      memberSince: resolvedMemberSince
     };
     setUser(newUser);
     try {
       localStorage.setItem('godysell_user', JSON.stringify(newUser));
       syncUserProfileToSupabase(newUser).catch(() => {});
+      // Asynchronously fetch latest saved profile from Supabase to hydrate phone
+      fetchUserProfileFromSupabase(email).then((supaProfile) => {
+        if (supaProfile) {
+          setUser((curr) => {
+            if (!curr || curr.email.toLowerCase() !== email.toLowerCase()) return curr;
+            const updatedProfile: UserProfile = {
+              ...curr,
+              phone: supaProfile.phone !== undefined && supaProfile.phone !== '' ? supaProfile.phone : curr.phone,
+              name: supaProfile.name || curr.name,
+              memberSince: '2026',
+              region: supaProfile.region || curr.region
+            };
+            localStorage.setItem('godysell_user', JSON.stringify(updatedProfile));
+            return updatedProfile;
+          });
+        }
+      }).catch(() => {});
     } catch (e) {
       console.error(e);
     }
@@ -184,6 +211,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       try {
         localStorage.setItem('godysell_user', JSON.stringify(updated));
         syncUserProfileToSupabase(updated).catch(() => {});
+
+        // If phone or name was updated, reflect across all products published by this seller in Supabase and state
+        if (updates.phone !== undefined || updates.name !== undefined) {
+          const finalPhone = updates.phone !== undefined ? updates.phone : (prev.phone || '');
+          const finalName = updates.name !== undefined ? updates.name : prev.name;
+          updateSellerContactAcrossAllProducts(prev.email, finalPhone, finalName).catch(() => {});
+          setProducts((currentProducts) =>
+            currentProducts.map((p) => {
+              if (p.sellerEmail?.trim().toLowerCase() === prev.email.trim().toLowerCase()) {
+                return {
+                  ...p,
+                  sellerPhone: finalPhone,
+                  sellerName: finalName
+                };
+              }
+              return p;
+            })
+          );
+        }
       } catch (e) {
         console.error(e);
       }
@@ -570,9 +616,40 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [selectedRegion, setSelectedRegion] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [selectedProduct, setSelectedProductState] = useState<Product | null>(null);
 
-  // Modals
+  const setSelectedProduct = (prodOrUpdater: Product | null | ((prev: Product | null) => Product | null)) => {
+    setSelectedProductState((prev) => {
+      const next = typeof prodOrUpdater === 'function' ? prodOrUpdater(prev) : prodOrUpdater;
+      if (typeof window !== 'undefined') {
+        try {
+          const url = new URL(window.location.href);
+          if (next && next.id) {
+            url.searchParams.set('product', next.id);
+          } else {
+            url.searchParams.delete('product');
+          }
+          window.history.replaceState({}, '', url.toString());
+        } catch {}
+      }
+      return next;
+    });
+  };
+
+  // Auto-open product when visiting direct shareable link (e.g. ?product=prod-123)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const urlProductId = params.get('product') || (window.location.hash.startsWith('#product-') ? window.location.hash.replace('#product-', '') : null);
+      if (urlProductId && products.length > 0) {
+        const found = products.find((p) => p.id === urlProductId);
+        if (found) {
+          setSelectedProductState(found);
+        }
+      }
+    } catch {}
+  }, [products]);
   const [isCreateProductModalOpen, setIsCreateProductModalOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [isRecordSaleModalOpen, setIsRecordSaleModalOpen] = useState(false);
@@ -676,7 +753,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     };
 
-    // Initial silent sync on mount
+    // Initial silent sync on mount and upgrade legacy 2024 records to 2026
+    upgradeLegacyMemberSinceInDatabase().catch(() => {});
+    try {
+      const rawAccounts = localStorage.getItem('godysell_google_accounts');
+      if (rawAccounts) {
+        const parsed = JSON.parse(rawAccounts);
+        if (Array.isArray(parsed)) {
+          const upgraded = parsed.map((a: any) => ({ ...a, memberSince: '2026' }));
+          localStorage.setItem('godysell_google_accounts', JSON.stringify(upgraded));
+        }
+      }
+    } catch {}
     silentSync();
 
     // Sync on tab focus or when user returns to app
@@ -748,20 +836,47 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const addProduct = async (productData: Omit<Product, 'id' | 'views' | 'inquiries' | 'salesCount' | 'createdAt'>): Promise<boolean> => {
     const finalSellerEmail = user?.email?.trim().toLowerCase() || 'vendor@godysell.com';
+    const finalSellerName = productData.sellerName?.trim() || user?.name || 'Seller';
+    
+    // Determine seller phone: form input takes priority, then user profile phone. Never fabricate or default.
+    const enteredPhone = productData.sellerPhone !== undefined ? productData.sellerPhone.trim() : '';
+    const finalSellerPhone = enteredPhone || (user?.phone ? user.phone.trim() : '');
+
+    const finalMemberSince = '2026';
+
     const newProduct: Product = {
       ...productData,
       id: `prod-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`,
       sellerEmail: finalSellerEmail,
-      sellerName: productData.sellerName || user?.name || 'Seller',
-      sellerPhone: productData.sellerPhone || user?.phone || '+233(0)592836664',
+      sellerName: finalSellerName,
+      sellerPhone: finalSellerPhone,
+      sellerMemberSince: finalMemberSince,
       views: 1,
       inquiries: 0,
       salesCount: 0,
       createdAt: new Date().toISOString()
     };
 
+    // If seller provided/updated phone number, update seller account and propagate to all listings
+    if (finalSellerPhone && user && user.email) {
+      if (user.phone !== finalSellerPhone) {
+        updateUserProfile({ phone: finalSellerPhone, name: finalSellerName });
+      } else {
+        updateSellerContactAcrossAllProducts(finalSellerEmail, finalSellerPhone, finalSellerName).catch(() => {});
+      }
+    }
+
     // 1. Immediately reflect in state so it appears in the Shop page permanently
-    setProducts((prev) => [newProduct, ...prev.filter((p) => p.id !== newProduct.id)]);
+    // and synchronize any existing products by this seller to the new phone
+    setProducts((prev) => {
+      const updated = prev.map((p) => {
+        if (finalSellerPhone && p.sellerEmail && p.sellerEmail.trim().toLowerCase() === finalSellerEmail) {
+          return { ...p, sellerPhone: finalSellerPhone, sellerName: finalSellerName };
+        }
+        return p;
+      });
+      return [newProduct, ...updated.filter((p) => p.id !== newProduct.id)];
+    });
 
     // 2. Immediately cache in localStorage so it persists across refreshes
     try {
@@ -797,6 +912,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (!isProductOwner(id)) {
       console.warn("Unauthorized: Cannot edit someone else's product.");
       return false;
+    }
+
+    // If phone was updated during product edit, update profile and all products
+    if (updates.sellerPhone !== undefined && user && user.email) {
+      const trimmedPhone = updates.sellerPhone.trim();
+      if (trimmedPhone && trimmedPhone !== user.phone) {
+        updateUserProfile({ phone: trimmedPhone });
+      }
     }
     const previous = products;
     setProducts((prev) =>

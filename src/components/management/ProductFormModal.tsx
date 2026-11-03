@@ -15,6 +15,7 @@ import { ProductCategory, ProductCondition, RegionGhana } from '../../types';
 import { GHANA_REGIONS, CATEGORIES_WITH_META } from '../../data/initialProducts';
 import { compressImageFile } from '../../utils/imageCompressor';
 import { uploadProductImageToStorage } from '../../services/productDatabase';
+import { formatMemberSinceYear } from '../../utils/whatsapp';
 
 export const ProductFormModal: React.FC = () => {
   const {
@@ -45,7 +46,7 @@ export const ProductFormModal: React.FC = () => {
   const [description, setDescription] = useState('');
   const [images, setImages] = useState<string[]>([]);
   const [sellerName, setSellerName] = useState(user?.name || 'My GodySell Shop Ghana');
-  const [sellerPhone, setSellerPhone] = useState(user?.phone || '+233(0)592836664');
+  const [sellerPhone, setSellerPhone] = useState(user?.phone || '');
   const [specs, setSpecs] = useState<Array<{ key: string; value: string }>>([
     { key: 'Brand', value: '' },
     { key: 'Condition', value: 'Brand New' }
@@ -72,7 +73,7 @@ export const ProductFormModal: React.FC = () => {
       setDescription(editingProduct.description);
       setImages(editingProduct.images || []);
       setSellerName(editingProduct.sellerName || user?.name || 'My GodySell Shop Ghana');
-      setSellerPhone(editingProduct.sellerPhone || user?.phone || '+233(0)592836664');
+      setSellerPhone(editingProduct.sellerPhone !== undefined ? editingProduct.sellerPhone : (user?.phone || ''));
       setSpecs(
         Object.entries(editingProduct.specifications || {}).map(([key, value]) => ({
           key,
@@ -94,7 +95,7 @@ export const ProductFormModal: React.FC = () => {
       setDescription('');
       setImages([]);
       setSellerName(user?.name || 'My GodySell Shop Ghana');
-      setSellerPhone(user?.phone || '+233(0)592836664');
+      setSellerPhone(user?.phone || '');
       setSpecs([{ key: 'Brand', value: '' }]);
     }
   }, [editingProduct, isCreateProductModalOpen, user]);
@@ -177,14 +178,9 @@ export const ProductFormModal: React.FC = () => {
       return;
     }
 
-    const finalSellerPhone = sellerPhone.trim() || user?.phone || '+233(0)592836664';
+    const finalSellerPhone = sellerPhone.trim() || (user?.phone ? user.phone.trim() : '');
     const finalSellerName = sellerName.trim() || user?.name || 'My GodySell Shop Ghana';
-
-    if (!finalSellerPhone) {
-      setSaveError('Please enter your phone number so buyers in Ghana can contact you.');
-      phoneInputRef.current?.focus();
-      return;
-    }
+    const finalMemberSince = '2026';
 
     setIsSaving(true);
 
@@ -213,7 +209,7 @@ export const ProductFormModal: React.FC = () => {
       sellerName: finalSellerName,
       sellerPhone: finalSellerPhone,
       sellerEmail: editingProduct?.sellerEmail || user?.email?.trim().toLowerCase() || 'vendor@godysell.com',
-      sellerMemberSince: editingProduct?.sellerMemberSince || 'Sep 2024',
+      sellerMemberSince: finalMemberSince,
       sellerRating: editingProduct?.sellerRating || 5.0,
       sellerReviewCount: editingProduct?.sellerReviewCount || 1,
       verifiedSeller: true,
@@ -502,7 +498,7 @@ export const ProductFormModal: React.FC = () => {
                 {/* Phone Number Field */}
                 <div>
                   <label className="block text-xs font-bold text-slate-800 mb-1">
-                    Seller Phone Number (Ghana) <span className="text-rose-500">*</span>
+                    Seller Phone Number (Ghana) <span className="text-slate-400 font-normal">(for Calls &amp; WhatsApp)</span>
                   </label>
                   <div className="relative">
                     <div className="absolute left-3 top-1/2 -translate-y-1/2 flex items-center gap-1.5 text-slate-500 pointer-events-none">
@@ -512,8 +508,7 @@ export const ProductFormModal: React.FC = () => {
                     <input
                       ref={phoneInputRef}
                       type="tel"
-                      required
-                      placeholder="+233(0)592836664"
+                      placeholder="e.g. 0244123456 or 0501234567"
                       value={sellerPhone}
                       onChange={(e) => {
                         setSellerPhone(e.target.value);
