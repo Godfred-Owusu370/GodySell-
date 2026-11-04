@@ -174,7 +174,7 @@ async function saveToCloud(products: any[]) {
 export default async function handler(req: any, res: any) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-user-email');
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
@@ -209,36 +209,92 @@ export default async function handler(req: any, res: any) {
     }
 
     if (req.method === 'PUT') {
-      const { id } = req.query;
+      const id = (req.query?.id as string) || req.body?.id;
+      if (!id) {
+        return res.status(400).json({ error: 'Product ID is required' });
+      }
+
+      const callerEmail = ((req.headers['x-user-email'] as string) || req.body?.callerEmail || '').trim().toLowerCase();
+      const current = await fetchFromCloud();
+      const targetProduct = current.find((p: any) => p.id === id);
+
+      if (!targetProduct) {
+        return res.status(404).json({ error: 'Product not found' });
+      }
+
+      const adminEmail = 'godfredowusu370@gmail.com';
+      const ownerEmail = (targetProduct.sellerEmail || '').trim().toLowerCase();
+
+      // Ownership security verification
+      if (callerEmail && callerEmail !== adminEmail && ownerEmail && callerEmail !== ownerEmail) {
+        return res.status(403).json({ error: 'Unauthorized: You do not have permission to edit this product.' });
+      }
+
       const updates = req.body;
       const sb = getSupabaseClient();
       if (sb && id) {
         try {
-          await sb.from('products').update(updates).eq('id', id);
+          const supaUpdate: any = { updated_at: new Date().toISOString() };
+          if (updates.title !== undefined) supaUpdate.title = updates.title;
+          if (updates.price !== undefined) supaUpdate.price = updates.price;
+          if (updates.category !== undefined) supaUpdate.category = updates.category;
+          if (updates.subcategory !== undefined) supaUpdate.subcategory = updates.subcategory;
+          if (updates.region !== undefined) supaUpdate.region = updates.region;
+          if (updates.city !== undefined) supaUpdate.city = updates.city;
+          if (updates.condition !== undefined) supaUpdate.condition = updates.condition;
+          if (updates.images !== undefined) supaUpdate.images = updates.images;
+          if (updates.description !== undefined) supaUpdate.description = updates.description;
+          if (updates.stock !== undefined) supaUpdate.stock = updates.stock;
+          if (updates.status !== undefined) supaUpdate.status = updates.status;
+          if (updates.negotiable !== undefined) supaUpdate.negotiable = updates.negotiable;
+          if (updates.sellerName !== undefined) supaUpdate.seller_name = updates.sellerName;
+          if (updates.sellerPhone !== undefined) supaUpdate.seller_phone = updates.sellerPhone;
+          if (updates.specifications !== undefined) supaUpdate.specifications = updates.specifications;
+
+          await sb.from('products').update(supaUpdate).eq('id', id);
         } catch (e) {
           console.warn('Vercel API: Supabase update exception:', e);
         }
       }
 
-      const current = await fetchFromCloud();
       const updated = current.map((p: any) => (p.id === id ? { ...p, ...updates } : p));
       await saveToCloud(updated);
 
-      return res.status(200).json({ success: true, id });
+      return res.status(200).json({ success: true, id, product: { ...targetProduct, ...updates } });
     }
 
     if (req.method === 'DELETE') {
-      const { id } = req.query;
+      const id = (req.query?.id as string) || req.body?.id;
+      if (!id) {
+        return res.status(400).json({ error: 'Product ID is required' });
+      }
+
+      const callerEmail = ((req.headers['x-user-email'] as string) || (req.query?.callerEmail as string) || req.body?.callerEmail || '').trim().toLowerCase();
+      const current = await fetchFromCloud();
+      const targetProduct = current.find((p: any) => p.id === id);
+
+      if (!targetProduct) {
+        return res.status(200).json({ success: true, id, message: 'Product already deleted' });
+      }
+
+      const adminEmail = 'godfredowusu370@gmail.com';
+      const ownerEmail = (targetProduct.sellerEmail || '').trim().toLowerCase();
+
+      // Ownership security verification
+      if (callerEmail && callerEmail !== adminEmail && ownerEmail && callerEmail !== ownerEmail) {
+        return res.status(403).json({ error: 'Unauthorized: You do not have permission to delete this product.' });
+      }
+
       const sb = getSupabaseClient();
       if (sb && id) {
         try {
+          await sb.from('products').update({ status: 'archived', updated_at: new Date().toISOString() }).eq('id', id);
           await sb.from('products').delete().eq('id', id);
         } catch (e) {
           console.warn('Vercel API: Supabase delete exception:', e);
         }
       }
 
-      const current = await fetchFromCloud();
       const updated = current.filter((p: any) => p.id !== id);
       await saveToCloud(updated);
 

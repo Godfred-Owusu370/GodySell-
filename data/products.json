@@ -67,39 +67,6 @@
     "specifications": {}
   },
   {
-    "id": "prod-1793635305212-296",
-    "title": "Laptop",
-    "price": 3500,
-    "category": "Electronics & Appliances",
-    "subcategory": "Laptops & Computers",
-    "region": "Greater Accra",
-    "city": "East Legon, Accra",
-    "condition": "Foreign Used",
-    "images": [
-      "https://pqktfgsxgaslyngffwxo.supabase.co/storage/v1/object/public/product-images/products/1793635236587_ynspj_IMG_3172.jpeg"
-    ],
-    "description": "Laptop available for sale in East Legon, Accra, Greater Accra.",
-    "negotiable": true,
-    "verifiedSeller": true,
-    "sellerName": "GODY ELECTRONICS",
-    "sellerPhone": "+233(0)592836664",
-    "sellerEmail": "godfredowusu870@gmail.com",
-    "sellerMemberSince": "2026",
-    "sellerRating": 5,
-    "sellerReviewCount": 1,
-    "stock": 5,
-    "sku": "SKU-7699",
-    "status": "active",
-    "views": 1,
-    "inquiries": 0,
-    "salesCount": 0,
-    "createdAt": "2026-11-02T16:01:45.213+00:00",
-    "featured": false,
-    "specifications": {
-      "HP Elite Book": "2TB"
-    }
-  },
-  {
     "id": "prod-supa-1793632915828",
     "title": "Samsung Galaxy S24 Ultra - East Legon",
     "price": 13500,

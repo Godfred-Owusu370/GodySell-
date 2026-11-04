@@ -124,6 +124,9 @@ interface AppContextType {
   isProductOwner: (productOrId: Product | string) => boolean;
   submitReport: (report: { reportedProductId?: string; reportedSellerEmail?: string; reporterEmail?: string; reason: string; details?: string; }) => Promise<boolean>;
   submitSupportMessage: (support: { userName: string; userEmail: string; userPhone?: string; subject: string; message: string; }) => Promise<boolean>;
+  toast: { message: string; type: 'success' | 'error' | 'info' } | null;
+  showToast: (message: string, type?: 'success' | 'error' | 'info') => void;
+  dismissToast: () => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -659,6 +662,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [isSyncing, setIsSyncing] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
 
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
+    setToast({ message, type });
+  };
+  const dismissToast = () => setToast(null);
+
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => setToast(null), 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
+
   const refreshProducts = async () => {
     setIsSyncing(true);
     setSyncError(null);
@@ -826,11 +842,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const isProductOwner = (productOrId: Product | string): boolean => {
-    if (!user?.email) return true;
+    if (!user?.email) return false;
     const normalized = user.email.trim().toLowerCase();
     if (normalized === 'godfredowusu370@gmail.com') return true;
     const prod = typeof productOrId === 'string' ? products.find((p) => p.id === productOrId) : productOrId;
-    if (!prod || !prod.sellerEmail) return true;
+    if (!prod || !prod.sellerEmail) return false;
     return prod.sellerEmail.trim().toLowerCase() === normalized;
   };
 
@@ -892,6 +908,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     // 3. Persist to shared online cloud database & local API
     try {
       await publishProductToCloud(newProduct, user?.id);
+      showToast('Product published successfully!', 'success');
     } catch (err: any) {
       console.warn('Cloud persistence warning, product safely kept in local shop catalog:', err);
     }
@@ -908,9 +925,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const updateProduct = async (id: string, updates: Partial<Product>): Promise<boolean> => {
-    // Only the owner can edit their published product
+    // Only the owner or admin can edit their published product
     if (!isProductOwner(id)) {
-      console.warn("Unauthorized: Cannot edit someone else's product.");
+      showToast("Unauthorized: You can only edit your own products.", "error");
       return false;
     }
 
@@ -930,26 +947,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     try {
-      await updateProductInCloud(id, updates);
-      if (typeof window !== 'undefined') {
-        fetch(`/api/products/${encodeURIComponent(id)}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(updates)
-        }).catch(() => {});
-      }
+      await updateProductInCloud(id, updates, user?.email);
+      showToast('Product updated successfully!', 'success');
       return true;
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to update product in cloud database:', err);
       setProducts(previous);
+      showToast(err.message || 'Failed to update product.', 'error');
       throw err;
     }
   };
 
   const deleteProduct = async (id: string): Promise<boolean> => {
-    // Only the owner can delete their published product
+    // Only the owner or admin can delete their published product
     if (!isProductOwner(id)) {
-      console.warn("Unauthorized: Cannot delete someone else's product.");
+      showToast("Unauthorized: You can only delete your own products.", "error");
       return false;
     }
     const previous = products;
@@ -967,16 +979,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
 
     try {
-      await deleteProductFromCloud(id);
-      if (typeof window !== 'undefined') {
-        fetch(`/api/products/${encodeURIComponent(id)}`, {
-          method: 'DELETE'
-        }).catch(() => {});
-      }
+      await deleteProductFromCloud(id, user?.email);
+      showToast('Product deleted successfully!', 'success');
       return true;
-    } catch (err) {
+    } catch (err: any) {
       console.error('Failed to delete product in cloud database:', err);
       setProducts(previous);
+      showToast(err.message || 'Failed to delete product.', 'error');
       throw err;
     }
   };
@@ -1263,7 +1272,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         myOutOfStockCount,
         isProductOwner,
         submitReport,
-        submitSupportMessage
+        submitSupportMessage,
+        toast,
+        showToast,
+        dismissToast
       }}
     >
       {children}

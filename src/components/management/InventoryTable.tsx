@@ -11,9 +11,10 @@ import {
   RefreshCw,
   Tag,
   Package,
-  ShoppingBag
+  ShoppingBag,
+  Loader2
 } from 'lucide-react';
-import { ProductCategory } from '../../types';
+import { ProductCategory, Product } from '../../types';
 import { CATEGORIES_WITH_META } from '../../data/initialProducts';
 
 export const InventoryTable: React.FC = () => {
@@ -31,6 +32,8 @@ export const InventoryTable: React.FC = () => {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | 'in_stock' | 'low_stock' | 'out_of_stock'>('all');
   const [categoryFilter, setCategoryFilter] = useState<string>('all');
+  const [productToDelete, setProductToDelete] = useState<Product | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // If the seller has no published products, keep the seller hub blank for them
   if (myProducts.length === 0) {
@@ -343,12 +346,8 @@ export const InventoryTable: React.FC = () => {
                             <Edit2 className="w-4 h-4" />
                           </button>
                           <button
-                            onClick={() => {
-                              if (window.confirm(`Delete "${product.title}"?`)) {
-                                deleteProduct(product.id);
-                              }
-                            }}
-                            className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-slate-100 rounded"
+                            onClick={() => setProductToDelete(product)}
+                            className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-slate-100 rounded transition-colors"
                             title="Delete listing"
                           >
                             <Trash2 className="w-4 h-4" />
@@ -363,6 +362,84 @@ export const InventoryTable: React.FC = () => {
           </table>
         </div>
       </div>
+
+      {/* Delete Confirmation Dialog */}
+      {productToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl max-w-md w-full shadow-2xl border border-slate-200 overflow-hidden">
+            <div className="p-5 sm:p-6 space-y-4">
+              <div className="w-12 h-12 rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center border border-rose-100">
+                <Trash2 className="w-6 h-6" />
+              </div>
+
+              <div className="space-y-1">
+                <h3 className="text-base sm:text-lg font-black text-slate-900">
+                  Delete Product
+                </h3>
+                <p className="text-xs sm:text-sm text-slate-600 font-medium leading-relaxed">
+                  Are you sure you want to delete this product? This action cannot be undone.
+                </p>
+              </div>
+
+              {/* Preview card of item being deleted */}
+              <div className="flex items-center gap-3 p-3 bg-slate-50 border border-slate-200 rounded-xl">
+                <img
+                  src={productToDelete.images[0]}
+                  alt=""
+                  referrerPolicy="no-referrer"
+                  className="w-12 h-12 rounded-lg object-cover border border-slate-200 shrink-0"
+                />
+                <div className="min-w-0 flex-1">
+                  <h4 className="text-xs font-bold text-slate-900 truncate">
+                    {productToDelete.title}
+                  </h4>
+                  <p className="text-[11px] text-emerald-800 font-bold tabular-nums">
+                    GH₵ {productToDelete.price.toLocaleString()}
+                  </p>
+                  <p className="text-[10px] text-slate-400 truncate">
+                    {productToDelete.city}, {productToDelete.region}
+                  </p>
+                </div>
+              </div>
+
+              {/* Buttons: Cancel and Yes, Delete Product */}
+              <div className="flex items-center justify-end gap-2.5 pt-2">
+                <button
+                  type="button"
+                  disabled={isDeleting}
+                  onClick={() => setProductToDelete(null)}
+                  className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-colors disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={isDeleting}
+                  onClick={async () => {
+                    setIsDeleting(true);
+                    try {
+                      await deleteProduct(productToDelete.id);
+                      setProductToDelete(null);
+                    } finally {
+                      setIsDeleting(false);
+                    }
+                  }}
+                  className="px-5 py-2.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold rounded-xl transition-all shadow-xs flex items-center justify-center gap-2 disabled:opacity-50"
+                >
+                  {isDeleting ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Deleting...</span>
+                    </>
+                  ) : (
+                    <span>Yes, Delete Product</span>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

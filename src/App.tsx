@@ -13,6 +13,7 @@ import { GoogleLoginWall } from './components/auth/GoogleLoginWall';
 import { AboutPage } from './components/AboutPage';
 import { Footer } from './components/Footer';
 import { MobileBottomNav } from './components/layout/MobileBottomNav';
+import { ToastNotification } from './components/layout/ToastNotification';
 
 const MainLayout: React.FC = () => {
   const { activeView, user } = useApp();
@@ -60,11 +61,12 @@ const MainLayout: React.FC = () => {
       {/* Mobile Bottom Navigation Bar */}
       <MobileBottomNav />
 
-      {/* Global Interactive Modals */}
+      {/* Global Interactive Modals & Notifications */}
       <ProductDetailModal />
       <ProductFormModal />
       <RecordSaleModal />
       <BuyerChatModal />
+      <ToastNotification />
     </div>
   );
 };

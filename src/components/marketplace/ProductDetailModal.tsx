@@ -16,7 +16,8 @@ import {
   Tag,
   Send,
   Edit2,
-  Trash2
+  Trash2,
+  Loader2
 } from 'lucide-react';
 import { ShareModal } from './ShareModal';
 import { generateWhatsAppLink, formatMemberSinceYear } from '../../utils/whatsapp';
@@ -38,6 +39,7 @@ export const ProductDetailModal: React.FC = () => {
   } = useApp();
 
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [showPhone, setShowPhone] = useState(false);
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [activeImageIdx, setActiveImageIdx] = useState(0);
@@ -292,26 +294,42 @@ export const ProductDetailModal: React.FC = () => {
                     </div>
 
                     {confirmDelete && (
-                      <div className="pt-2 border-t border-emerald-200/60 flex items-center justify-between gap-2">
-                        <span className="text-[11px] font-semibold text-rose-700">Remove this item from the shop?</span>
-                        <div className="flex items-center gap-1.5 shrink-0">
+                      <div className="pt-3 border-t border-emerald-200/60 space-y-2.5">
+                        <p className="text-xs font-semibold text-rose-700 leading-snug">
+                          Are you sure you want to delete this product? This action cannot be undone.
+                        </p>
+                        <div className="flex items-center justify-end gap-2 shrink-0">
                           <button
                             type="button"
+                            disabled={isDeleting}
                             onClick={() => setConfirmDelete(false)}
-                            className="px-2.5 py-1 text-xs font-semibold text-slate-600 bg-white hover:bg-slate-100 rounded-lg border border-slate-200"
+                            className="px-3 py-1.5 text-xs font-bold text-slate-700 bg-white hover:bg-slate-100 rounded-lg border border-slate-300 transition-colors disabled:opacity-50"
                           >
                             Cancel
                           </button>
                           <button
                             type="button"
-                            onClick={() => {
-                              deleteProduct(selectedProduct.id);
-                              setSelectedProduct(null);
-                              setConfirmDelete(false);
+                            disabled={isDeleting}
+                            onClick={async () => {
+                              setIsDeleting(true);
+                              try {
+                                await deleteProduct(selectedProduct.id);
+                                setSelectedProduct(null);
+                                setConfirmDelete(false);
+                              } finally {
+                                setIsDeleting(false);
+                              }
                             }}
-                            className="px-3 py-1 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-lg shadow-xs"
+                            className="px-3.5 py-1.5 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-lg shadow-xs transition-colors flex items-center gap-1.5 disabled:opacity-50"
                           >
-                            Confirm Delete
+                            {isDeleting ? (
+                              <>
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                <span>Deleting...</span>
+                              </>
+                            ) : (
+                              <span>Yes, Delete Product</span>
+                            )}
                           </button>
                         </div>
                       </div>

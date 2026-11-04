@@ -26,14 +26,43 @@ function setLocalItem(key: string, value: string): void {
   } catch {}
 }
 
+const DELETED_IDS_STORAGE_KEY = 'godysell_deleted_product_ids';
+
+export function getDeletedProductIds(): Set<string> {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const raw = window.localStorage.getItem(DELETED_IDS_STORAGE_KEY);
+      if (raw) {
+        const arr = JSON.parse(raw);
+        if (Array.isArray(arr)) return new Set(arr);
+      }
+    }
+  } catch {}
+  return new Set();
+}
+
+export function markProductIdDeleted(id: string): void {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const ids = getDeletedProductIds();
+      ids.add(id);
+      window.localStorage.setItem(DELETED_IDS_STORAGE_KEY, JSON.stringify(Array.from(ids)));
+    }
+  } catch {}
+}
+
 /**
  * Filter out any mock, test, demo, or placeholder products so only genuine user listings appear
  */
 export function filterGenuineProducts(products: any[]): Product[] {
   if (!Array.isArray(products)) return [];
+  const deletedIds = getDeletedProductIds();
   return products.filter((p) => {
     if (!p) return false;
     const id = String(p.id || '');
+    if (deletedIds.has(id)) {
+      return false;
+    }
     const title = String(p.title || '').trim().toLowerCase();
     if (id.startsWith('prod-test-') || id.startsWith('prod-00')) {
       return false;
@@ -256,9 +285,13 @@ export async function publishProductToCloud(product: Product, userId?: string | 
 }
 
 /**
- * Update an existing product in Supabase
+ * Update an existing product in Supabase & central database
  */
-export async function updateProductInCloud(productId: string, updates: Partial<Product>): Promise<Product[]> {
+export async function updateProductInCloud(
+  productId: string,
+  updates: Partial<Product>,
+  callerEmail?: string
+): Promise<Product[]> {
   const sb = getSupabase();
 
   if (sb) {
@@ -276,6 +309,10 @@ export async function updateProductInCloud(productId: string, updates: Partial<P
       if (updates.stock !== undefined) updateData.stock = updates.stock;
       if (updates.status !== undefined) updateData.status = updates.status;
       if (updates.negotiable !== undefined) updateData.negotiable = updates.negotiable;
+      if (updates.sellerName !== undefined) updateData.seller_name = updates.sellerName;
+      if (updates.sellerPhone !== undefined) updateData.seller_phone = updates.sellerPhone;
+      if (updates.sellerMemberSince !== undefined) updateData.seller_member_since = updates.sellerMemberSince;
+      if (updates.specifications !== undefined) updateData.specifications = updates.specifications;
 
       const { error } = await sb
         .from('products')
@@ -290,24 +327,51 @@ export async function updateProductInCloud(productId: string, updates: Partial<P
     }
   }
 
-  if (typeof window !== 'undefined') {
-    fetch(`/api/products?id=${encodeURIComponent(productId)}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(updates),
-    }).catch(() => {});
+  // Update local cache immediately so UI reflects change without latency
+  const cachedStr = getLocalItem(LOCAL_STORAGE_KEY);
+  let updatedList: Product[] = [];
+  if (cachedStr) {
+    try {
+      const parsed = JSON.parse(cachedStr);
+      if (Array.isArray(parsed)) {
+        updatedList = parsed.map((p: Product) => (p.id === productId ? { ...p, ...updates } : p));
+        setLocalItem(LOCAL_STORAGE_KEY, JSON.stringify(updatedList));
+      }
+    } catch {}
   }
 
-  const current = await fetchOnlineProducts().catch(() => []);
-  const updated = current.map((p) => (p.id === productId ? { ...p, ...updates } : p));
-  setLocalItem(LOCAL_STORAGE_KEY, JSON.stringify(updated));
-  return updated;
+  // Notify backend API with callerEmail header for ownership authorization
+  if (typeof window !== 'undefined') {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (callerEmail) headers['x-user-email'] = callerEmail;
+
+    fetch(`/api/products/${encodeURIComponent(productId)}`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify(updates),
+    }).catch(() => {
+      // Also fallback to query format
+      fetch(`/api/products?id=${encodeURIComponent(productId)}`, {
+        method: 'PUT',
+        headers,
+        body: JSON.stringify(updates),
+      }).catch(() => {});
+    });
+  }
+
+  return updatedList;
 }
 
 /**
- * Delete a product from Supabase
+ * Delete a product from Supabase & central marketplace
  */
-export async function deleteProductFromCloud(productId: string): Promise<Product[]> {
+export async function deleteProductFromCloud(
+  productId: string,
+  callerEmail?: string
+): Promise<Product[]> {
+  // 1. Mark in permanent tombstone set so it never flickers back
+  markProductIdDeleted(productId);
+
   const sb = getSupabase();
 
   if (sb) {
@@ -331,14 +395,34 @@ export async function deleteProductFromCloud(productId: string): Promise<Product
     }
   }
 
-  if (typeof window !== 'undefined') {
-    fetch(`/api/products?id=${encodeURIComponent(productId)}`, {
-      method: 'DELETE',
-    }).catch(() => {});
+  // Update local cache immediately
+  const cachedStr = getLocalItem(LOCAL_STORAGE_KEY);
+  let updatedList: Product[] = [];
+  if (cachedStr) {
+    try {
+      const parsed = JSON.parse(cachedStr);
+      if (Array.isArray(parsed)) {
+        updatedList = parsed.filter((p: Product) => p.id !== productId);
+        setLocalItem(LOCAL_STORAGE_KEY, JSON.stringify(updatedList));
+      }
+    } catch {}
   }
 
-  const current = await fetchOnlineProducts().catch(() => []);
-  const updated = current.filter((p) => p.id !== productId);
-  setLocalItem(LOCAL_STORAGE_KEY, JSON.stringify(updated));
-  return updated;
+  // Notify backend API with callerEmail header for ownership authorization
+  if (typeof window !== 'undefined') {
+    const headers: Record<string, string> = {};
+    if (callerEmail) headers['x-user-email'] = callerEmail;
+
+    fetch(`/api/products/${encodeURIComponent(productId)}`, {
+      method: 'DELETE',
+      headers,
+    }).catch(() => {
+      fetch(`/api/products?id=${encodeURIComponent(productId)}`, {
+        method: 'DELETE',
+        headers,
+      }).catch(() => {});
+    });
+  }
+
+  return updatedList;
 }

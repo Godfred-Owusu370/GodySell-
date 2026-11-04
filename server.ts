@@ -247,7 +247,7 @@ app.use(express.urlencoded({ extended: true, limit: '15mb' }));
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, x-user-email');
   res.header('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0');
   res.header('Pragma', 'no-cache');
   res.header('Expires', '0');
@@ -361,10 +361,14 @@ app.post('/api/products/sync-all', (req: Request, res: Response) => {
   }
 });
 
-app.put('/api/products/:id', (req: Request, res: Response) => {
+const handleProductUpdate = async (req: Request, res: Response) => {
   try {
-    const { id } = req.params;
-    const updates = req.body;
+    const id = req.params.id || (req.query.id as string);
+    if (!id) {
+      return res.status(400).json({ error: 'Product ID is required' });
+    }
+
+    const callerEmail = ((req.headers['x-user-email'] as string) || req.body.callerEmail || '').trim().toLowerCase();
     const products = readProducts();
     const index = products.findIndex((p: any) => p.id === id);
 
@@ -372,29 +376,112 @@ app.put('/api/products/:id', (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Product not found' });
     }
 
-    products[index] = { ...products[index], ...updates };
+    const existingProduct = products[index];
+    const adminEmail = 'godfredowusu370@gmail.com';
+    const ownerEmail = (existingProduct.sellerEmail || '').trim().toLowerCase();
+
+    // Enforce ownership: only the owner or platform admin can update
+    if (callerEmail && callerEmail !== adminEmail && ownerEmail && callerEmail !== ownerEmail) {
+      console.warn(`Unauthorized product update attempt on ${id} by ${callerEmail} (owner: ${ownerEmail})`);
+      return res.status(403).json({ error: 'Unauthorized: You do not have permission to edit this product.' });
+    }
+
+    const updates = req.body;
+    const updatedProduct = {
+      ...existingProduct,
+      ...updates,
+      updatedAt: new Date().toISOString()
+    };
+    products[index] = updatedProduct;
+
     writeProducts(products);
     broadcastProducts(products);
     pushToCloudRemote(products).catch(() => {});
 
-    res.json(products[index]);
+    // Sync to Supabase in background
+    if (SUPABASE_URL && SUPABASE_KEY && SUPABASE_URL.startsWith('https://')) {
+      const supaPatch: any = { updated_at: new Date().toISOString() };
+      if (updates.title !== undefined) supaPatch.title = updates.title;
+      if (updates.price !== undefined) supaPatch.price = updates.price;
+      if (updates.category !== undefined) supaPatch.category = updates.category;
+      if (updates.subcategory !== undefined) supaPatch.subcategory = updates.subcategory;
+      if (updates.region !== undefined) supaPatch.region = updates.region;
+      if (updates.city !== undefined) supaPatch.city = updates.city;
+      if (updates.condition !== undefined) supaPatch.condition = updates.condition;
+      if (updates.images !== undefined) supaPatch.images = updates.images;
+      if (updates.description !== undefined) supaPatch.description = updates.description;
+      if (updates.stock !== undefined) supaPatch.stock = updates.stock;
+      if (updates.status !== undefined) supaPatch.status = updates.status;
+      if (updates.negotiable !== undefined) supaPatch.negotiable = updates.negotiable;
+      if (updates.sellerName !== undefined) supaPatch.seller_name = updates.sellerName;
+      if (updates.sellerPhone !== undefined) supaPatch.seller_phone = updates.sellerPhone;
+      if (updates.specifications !== undefined) supaPatch.specifications = updates.specifications;
+
+      fetch(`${SUPABASE_URL}/rest/v1/products?id=eq.${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        headers: {
+          apikey: SUPABASE_KEY,
+          Authorization: `Bearer ${SUPABASE_KEY}`,
+          'Content-Type': 'application/json',
+          Prefer: 'return=representation'
+        },
+        body: JSON.stringify(supaPatch)
+      }).catch((e) => console.warn('Server Supabase PATCH notice:', e));
+    }
+
+    return res.status(200).json(updatedProduct);
   } catch (error) {
     console.error('Failed to update product:', error);
-    res.status(500).json({ error: 'Failed to update product' });
+    return res.status(500).json({ error: 'Failed to update product' });
   }
-});
+};
 
-app.delete('/api/products/:id', (req: Request, res: Response) => {
+app.put('/api/products/:id', handleProductUpdate);
+app.put('/api/products', handleProductUpdate);
+
+const handleProductDelete = async (req: Request, res: Response) => {
   try {
-    const { id } = req.params;
-    const products = readProducts();
-    const updated = products.filter((p: any) => p.id !== id);
+    const id = req.params.id || (req.query.id as string);
+    if (!id) {
+      return res.status(400).json({ error: 'Product ID is required' });
+    }
 
+    const callerEmail = ((req.headers['x-user-email'] as string) || (req.query.callerEmail as string) || req.body.callerEmail || '').trim().toLowerCase();
+    const products = readProducts();
+    const targetProduct = products.find((p: any) => p.id === id);
+
+    if (!targetProduct) {
+      // Product may already be deleted from this server node, acknowledge success
+      return res.status(200).json({ success: true, id, message: 'Product already deleted' });
+    }
+
+    const adminEmail = 'godfredowusu370@gmail.com';
+    const ownerEmail = (targetProduct.sellerEmail || '').trim().toLowerCase();
+
+    // Enforce ownership: only the owner or platform admin can delete
+    if (callerEmail && callerEmail !== adminEmail && ownerEmail && callerEmail !== ownerEmail) {
+      console.warn(`Unauthorized product delete attempt on ${id} by ${callerEmail} (owner: ${ownerEmail})`);
+      return res.status(403).json({ error: 'Unauthorized: You do not have permission to delete this product.' });
+    }
+
+    const updated = products.filter((p: any) => p.id !== id);
     writeProducts(updated);
     broadcastProducts(updated);
     pushToCloudRemote(updated).catch(() => {});
 
     if (SUPABASE_URL && SUPABASE_KEY && SUPABASE_URL.startsWith('https://')) {
+      // 1. Mark as archived
+      fetch(`${SUPABASE_URL}/rest/v1/products?id=eq.${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        headers: {
+          apikey: SUPABASE_KEY,
+          Authorization: `Bearer ${SUPABASE_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ status: 'archived', updated_at: new Date().toISOString() })
+      }).catch(() => {});
+
+      // 2. Delete row
       fetch(`${SUPABASE_URL}/rest/v1/products?id=eq.${encodeURIComponent(id)}`, {
         method: 'DELETE',
         headers: {
@@ -404,12 +491,15 @@ app.delete('/api/products/:id', (req: Request, res: Response) => {
       }).catch(() => {});
     }
 
-    res.json({ success: true, id });
+    return res.status(200).json({ success: true, id });
   } catch (error) {
     console.error('Failed to delete product:', error);
-    res.status(500).json({ error: 'Failed to delete product' });
+    return res.status(500).json({ error: 'Failed to delete product' });
   }
-});
+};
+
+app.delete('/api/products/:id', handleProductDelete);
+app.delete('/api/products', handleProductDelete);
 
 // Mount Vite or static frontend
 async function startServer() {
