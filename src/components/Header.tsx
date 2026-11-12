@@ -37,9 +37,9 @@ export const Header: React.FC = () => {
   return (
     <header className="sticky top-0 z-40 bg-white border-b border-slate-200 shadow-2xs">
       {/* Top primary row (Logo, Search on desktop, Region, Navigation, User profile) */}
-      <div className="max-w-7xl mx-auto px-3 sm:px-6 h-14 sm:h-16 flex items-center justify-between gap-3 sm:gap-6">
+      <div className="max-w-7xl mx-auto px-2 sm:px-6 h-14 sm:h-16 flex items-center justify-between gap-1 sm:gap-6">
         {/* Left: Brand Wordmark */}
-        <div className="flex items-center gap-4 shrink-0">
+        <div className="flex items-center gap-1.5 sm:gap-4 shrink-0">
           <button
             onClick={() => {
               setShowOnlySaved(false);
@@ -47,7 +47,7 @@ export const Header: React.FC = () => {
             }}
             className="flex items-center focus:outline-none text-left"
           >
-            <GodySellLogo size="md" />
+            <GodySellLogo size="md" className="scale-[0.90] sm:scale-100 origin-left" />
           </button>
 
           {/* Region Selector (Ghana) - Desktop */}
@@ -190,12 +190,12 @@ export const Header: React.FC = () => {
           </button>
 
           {/* Mobile Region Selector */}
-          <div className="flex md:hidden items-center gap-1 text-[11px] font-medium text-slate-700 bg-slate-100 border border-slate-200 rounded-lg px-2 py-1 shrink-0">
-            <MapPin className="w-3 h-3 text-slate-400" />
+          <div className="flex md:hidden items-center gap-0.5 text-[10px] font-medium text-slate-700 bg-slate-100 border border-slate-200 rounded-lg px-1.5 py-1 shrink-0">
+            <MapPin className="w-2.5 h-2.5 text-slate-400" />
             <select
               value={selectedRegion || ''}
               onChange={(e) => setSelectedRegion(e.target.value || null)}
-              className="bg-transparent border-none text-[11px] font-medium text-slate-700 focus:outline-none cursor-pointer max-w-[75px] truncate"
+              className="bg-transparent border-none text-[10px] font-medium text-slate-700 focus:outline-none cursor-pointer max-w-[50px] truncate"
             >
               <option value="">Ghana</option>
               {GHANA_REGIONS.map((r) => (
@@ -292,20 +292,20 @@ export const Header: React.FC = () => {
               )}
             </div>
           ) : (
-            <div className="flex items-center gap-1.5 sm:gap-2">
+            <div className="flex items-center gap-1 sm:gap-2 shrink-0">
               <button
                 type="button"
                 onClick={() => openAuthModal('general', 'login')}
-                className="px-2.5 sm:px-3 py-1.5 text-xs font-semibold text-slate-700 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors whitespace-nowrap"
+                className="px-1.5 sm:px-3 py-1 sm:py-1.5 text-[11px] sm:text-xs font-semibold text-slate-700 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors whitespace-nowrap shrink-0"
               >
                 Login
               </button>
               <button
                 type="button"
                 onClick={() => openAuthModal('general', 'create')}
-                className="px-2.5 sm:px-3.5 py-1.5 text-xs font-semibold text-white bg-emerald-800 hover:bg-emerald-900 rounded-lg transition-colors shadow-2xs whitespace-nowrap"
+                className="px-2 sm:px-3.5 py-1 sm:py-1.5 text-[11px] sm:text-xs font-bold text-white bg-emerald-800 hover:bg-emerald-900 rounded-lg transition-colors shadow-2xs whitespace-nowrap shrink-0 flex items-center justify-center text-center"
               >
-                Create Account
+                <span>Create Account</span>
               </button>
             </div>
           )}
