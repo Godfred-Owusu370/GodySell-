@@ -28,13 +28,9 @@ const MainLayout: React.FC = () => {
         </main>
         <Footer />
         <MobileBottomNav />
+        <GoogleLoginWall />
       </div>
     );
-  }
-
-  // If user is not logged in with Google, require Google Sign-In before accessing the site
-  if (!user) {
-    return <GoogleLoginWall />;
   }
 
   return (
@@ -66,6 +62,7 @@ const MainLayout: React.FC = () => {
       <ProductFormModal />
       <RecordSaleModal />
       <BuyerChatModal />
+      <GoogleLoginWall />
       <ToastNotification />
     </div>
   );

@@ -274,9 +274,13 @@ export async function publishProductToCloud(product: Product, userId?: string | 
 
   // 2. Also notify local / Vercel API endpoint
   if (typeof window !== 'undefined') {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (product.sellerEmail) {
+      headers['x-user-email'] = product.sellerEmail;
+    }
     fetch('/api/products', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify(product),
     }).catch(() => {});
   }

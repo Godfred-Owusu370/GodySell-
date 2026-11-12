@@ -1,6 +1,6 @@
 import React from 'react';
 import { useApp } from '../../context/AppContext';
-import { Store, Bookmark, PlusCircle, MessageSquare, Layers } from 'lucide-react';
+import { Store, Bookmark, PlusCircle, MessageSquare, Layers, User } from 'lucide-react';
 
 export const MobileBottomNav: React.FC = () => {
   const {
@@ -10,7 +10,10 @@ export const MobileBottomNav: React.FC = () => {
     totalUnreadChatCount,
     openCreateProductModal,
     showOnlySaved,
-    setShowOnlySaved
+    setShowOnlySaved,
+    user,
+    openAuthModal,
+    requireAuth
   } = useApp();
 
   return (
@@ -68,7 +71,13 @@ export const MobileBottomNav: React.FC = () => {
 
       {/* 4. Live Chats */}
       <button
-        onClick={() => setActiveView('chats')}
+        onClick={() => {
+          if (!user) {
+            requireAuth('buying', { type: 'chats' });
+            return;
+          }
+          setActiveView('chats');
+        }}
         className={`flex flex-col items-center justify-center py-1 px-3 relative transition-colors ${
           activeView === 'chats'
             ? 'text-emerald-800'
@@ -84,18 +93,28 @@ export const MobileBottomNav: React.FC = () => {
         )}
       </button>
 
-      {/* 5. Seller Hub */}
-      <button
-        onClick={() => setActiveView('management')}
-        className={`flex flex-col items-center justify-center py-1 px-3 transition-colors ${
-          activeView === 'management'
-            ? 'text-emerald-800'
-            : 'text-slate-400 hover:text-slate-600'
-        }`}
-      >
-        <Layers className="w-5 h-5" />
-        <span className="text-[10px] font-semibold mt-0.5 whitespace-nowrap">Seller Hub</span>
-      </button>
+      {/* 5. Seller Hub (when logged in) OR Sign In (when guest) */}
+      {user ? (
+        <button
+          onClick={() => setActiveView('management')}
+          className={`flex flex-col items-center justify-center py-1 px-3 transition-colors ${
+            activeView === 'management'
+              ? 'text-emerald-800'
+              : 'text-slate-400 hover:text-slate-600'
+          }`}
+        >
+          <Layers className="w-5 h-5" />
+          <span className="text-[10px] font-semibold mt-0.5 whitespace-nowrap">Seller Hub</span>
+        </button>
+      ) : (
+        <button
+          onClick={() => openAuthModal('general', 'login')}
+          className="flex flex-col items-center justify-center py-1 px-3 text-slate-400 hover:text-slate-700 transition-colors"
+        >
+          <User className="w-5 h-5" />
+          <span className="text-[10px] font-semibold mt-0.5 whitespace-nowrap">Sign In</span>
+        </button>
+      )}
     </nav>
   );
 };

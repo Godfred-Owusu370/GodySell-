@@ -8,7 +8,11 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
-const PORT = parseInt(process.env.PORT || '3000', 10);
+const portArgIndex = process.argv.indexOf('--port');
+const cliPort = portArgIndex !== -1 && process.argv[portArgIndex + 1] ? parseInt(process.argv[portArgIndex + 1], 10) : null;
+const defaultAppPort = process.env.DEFAULT_APP_PORT ? parseInt(process.env.DEFAULT_APP_PORT, 10) : null;
+const envPort = process.env.PORT && process.env.PORT !== '8080' ? parseInt(process.env.PORT, 10) : null;
+const PORT = cliPort || defaultAppPort || envPort || 3000;
 const DATA_FILE = path.resolve(__dirname, 'data', 'products.json');
 
 // Ensure data folder and file exist
@@ -321,6 +325,12 @@ app.post('/api/products', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Title is required' });
     }
 
+    // Require authentication to publish products
+    const callerEmail = ((req.headers['x-user-email'] as string) || req.body.callerEmail || req.body.sellerEmail || '').trim().toLowerCase();
+    if (!callerEmail) {
+      return res.status(401).json({ error: 'Authentication required: You must be logged in to publish products.' });
+    }
+
     const localProducts = readProducts();
     const newProduct = {
       ...productData,
@@ -368,7 +378,11 @@ const handleProductUpdate = async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Product ID is required' });
     }
 
-    const callerEmail = ((req.headers['x-user-email'] as string) || req.body.callerEmail || '').trim().toLowerCase();
+    const callerEmail = ((req.headers['x-user-email'] as string) || req.body.callerEmail || req.body.sellerEmail || '').trim().toLowerCase();
+    if (!callerEmail) {
+      return res.status(401).json({ error: 'Authentication required: You must be logged in to update products.' });
+    }
+
     const products = readProducts();
     const index = products.findIndex((p: any) => p.id === id);
 
@@ -381,7 +395,7 @@ const handleProductUpdate = async (req: Request, res: Response) => {
     const ownerEmail = (existingProduct.sellerEmail || '').trim().toLowerCase();
 
     // Enforce ownership: only the owner or platform admin can update
-    if (callerEmail && callerEmail !== adminEmail && ownerEmail && callerEmail !== ownerEmail) {
+    if (callerEmail !== adminEmail && ownerEmail && callerEmail !== ownerEmail) {
       console.warn(`Unauthorized product update attempt on ${id} by ${callerEmail} (owner: ${ownerEmail})`);
       return res.status(403).json({ error: 'Unauthorized: You do not have permission to edit this product.' });
     }
@@ -447,6 +461,10 @@ const handleProductDelete = async (req: Request, res: Response) => {
     }
 
     const callerEmail = ((req.headers['x-user-email'] as string) || (req.query.callerEmail as string) || req.body.callerEmail || '').trim().toLowerCase();
+    if (!callerEmail) {
+      return res.status(401).json({ error: 'Authentication required: You must be logged in to delete products.' });
+    }
+
     const products = readProducts();
     const targetProduct = products.find((p: any) => p.id === id);
 
@@ -459,7 +477,7 @@ const handleProductDelete = async (req: Request, res: Response) => {
     const ownerEmail = (targetProduct.sellerEmail || '').trim().toLowerCase();
 
     // Enforce ownership: only the owner or platform admin can delete
-    if (callerEmail && callerEmail !== adminEmail && ownerEmail && callerEmail !== ownerEmail) {
+    if (callerEmail !== adminEmail && ownerEmail && callerEmail !== ownerEmail) {
       console.warn(`Unauthorized product delete attempt on ${id} by ${callerEmail} (owner: ${ownerEmail})`);
       return res.status(403).json({ error: 'Unauthorized: You do not have permission to delete this product.' });
     }
@@ -518,10 +536,23 @@ async function startServer() {
 
   if (!isProd) {
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: { middlewareMode: true, hmr: false },
       appType: 'spa',
     });
     app.use(vite.middlewares);
+    app.use('*', async (req: Request, res: Response, next) => {
+      const url = req.originalUrl;
+      if (url.startsWith('/api') || url.startsWith('/@') || url.startsWith('/src') || url.startsWith('/node_modules')) {
+        return next();
+      }
+      try {
+        let template = fs.readFileSync(path.resolve(__dirname, 'index.html'), 'utf-8');
+        template = await vite.transformIndexHtml(url, template);
+        res.status(200).set({ 'Content-Type': 'text/html' }).end(template);
+      } catch (e) {
+        next(e);
+      }
+    });
   } else {
     const distPath = path.resolve(__dirname, 'dist');
     app.use(express.static(distPath));
@@ -530,8 +561,20 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`GodySell Full-Stack Server running at http://0.0.0.0:${PORT}`);
+  });
+
+  server.on('error', (err: any) => {
+    if (err.code === 'EADDRINUSE') {
+      console.warn(`Port ${PORT} is temporarily busy. Retrying in 1s...`);
+      setTimeout(() => {
+        try { server.close(); } catch {}
+        server.listen(PORT, '0.0.0.0');
+      }, 1000);
+    } else {
+      console.error('Server error:', err);
+    }
   });
 }
 

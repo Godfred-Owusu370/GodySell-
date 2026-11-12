@@ -35,7 +35,8 @@ export const ProductDetailModal: React.FC = () => {
     user,
     isProductOwner,
     openCreateProductModal,
-    deleteProduct
+    deleteProduct,
+    requireAuth
   } = useApp();
 
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -59,6 +60,15 @@ export const ProductDetailModal: React.FC = () => {
   const handleNegotiateAndChat = (customAmount?: number, customNote?: string) => {
     const finalOffer = customAmount !== undefined ? customAmount : (offerAmount ? parseFloat(offerAmount) : undefined);
     const finalNote = customNote !== undefined ? customNote : offerNote.trim();
+    if (!user) {
+      requireAuth('buying', {
+        type: 'buy_chat',
+        product: selectedProduct,
+        offerAmount: finalOffer,
+        offerNote: finalNote
+      });
+      return;
+    }
     startOrOpenChatForProduct(selectedProduct, finalNote || undefined, finalOffer);
     setSelectedProduct(null);
     setActiveView('chats');
@@ -342,7 +352,16 @@ export const ProductDetailModal: React.FC = () => {
                   <div className="space-y-1.5">
                     <button
                       type="button"
-                      onClick={() => setShowPhone(!showPhone)}
+                      onClick={() => {
+                        if (!user) {
+                          requireAuth('buying', {
+                            type: 'buy_order',
+                            product: selectedProduct
+                          });
+                          return;
+                        }
+                        setShowPhone(!showPhone);
+                      }}
                       className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-emerald-800 hover:bg-emerald-900 text-white font-bold text-sm rounded-xl transition-colors shadow-xs"
                     >
                       <Phone className="w-4 h-4" />
@@ -464,6 +483,13 @@ export const ProductDetailModal: React.FC = () => {
                         <button
                           type="button"
                           onClick={() => {
+                            if (!user) {
+                              requireAuth('buying', {
+                                type: 'buy_chat',
+                                product: selectedProduct
+                              });
+                              return;
+                            }
                             startOrOpenChatForProduct(selectedProduct);
                             setSelectedProduct(null);
                             setActiveView('chats');
@@ -483,6 +509,16 @@ export const ProductDetailModal: React.FC = () => {
                     href={whatsAppLink}
                     target="_blank"
                     rel="noopener noreferrer"
+                    onClick={(e) => {
+                      if (!user) {
+                        e.preventDefault();
+                        requireAuth('buying', {
+                          type: 'buy_whatsapp',
+                          product: selectedProduct,
+                          whatsAppLink
+                        });
+                      }
+                    }}
                     className="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-[#25D366] hover:bg-[#20ba5a] text-white font-bold text-xs rounded-xl transition-colors shadow-2xs"
                   >
                     <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
@@ -495,7 +531,16 @@ export const ProductDetailModal: React.FC = () => {
                 {/* Direct Order (Cash on Delivery or MoMo) */}
                 {selectedProduct.stock > 0 && !isOrdering && (
                   <button
-                    onClick={() => setIsOrdering(true)}
+                    onClick={() => {
+                      if (!user) {
+                        requireAuth('buying', {
+                          type: 'buy_order',
+                          product: selectedProduct
+                        });
+                        return;
+                      }
+                      setIsOrdering(true);
+                    }}
                     className="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs rounded-xl transition-colors shadow-xs"
                   >
                     <ShoppingBag className="w-4 h-4" />

@@ -30,6 +30,18 @@ import {
 } from '../services/supabase';
 import { formatMemberSinceYear } from '../utils/whatsapp';
 
+export type AuthPromptReason = 'buying' | 'selling' | 'general' | null;
+export type AuthModalMode = 'login' | 'create';
+
+export interface PendingAction {
+  type: 'sell' | 'buy_order' | 'buy_chat' | 'buy_whatsapp' | 'management' | 'chats';
+  product?: Product;
+  offerAmount?: number;
+  offerNote?: string;
+  whatsAppLink?: string;
+  isOrdering?: boolean;
+}
+
 interface AppContextType {
   user: UserProfile | null;
   loginWithGoogle: (profile: Partial<UserProfile>) => void;
@@ -70,6 +82,16 @@ interface AppContextType {
   syncError: string | null;
   refreshProducts: () => Promise<void>;
   
+  // Mandatory Auth Modal Controls
+  isAuthModalOpen: boolean;
+  authModalReason: AuthPromptReason;
+  authModalMode: AuthModalMode;
+  pendingAction: PendingAction | null;
+  openAuthModal: (reason?: AuthPromptReason, mode?: AuthModalMode, pending?: PendingAction) => void;
+  closeAuthModal: () => void;
+  requireAuth: (reason: AuthPromptReason, pending?: PendingAction) => boolean;
+  clearPendingAction: () => void;
+
   // Actions
   setSearchQuery: (q: string) => void;
   setSelectedCategory: (cat: string | null) => void;
@@ -137,21 +159,54 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       const savedStr = localStorage.getItem('godysell_user');
       if (savedStr) {
-        const saved: UserProfile = JSON.parse(savedStr);
-        // If the stored picture was a generic unsplash stock photo, update it to their own email picture
-        if (!saved.picture || saved.picture.includes('unsplash.com')) {
-          saved.picture = getEmailProfilePhoto(saved.email);
+        const saved = JSON.parse(savedStr);
+        if (saved && typeof saved === 'object' && saved.email) {
+          // If the stored picture was a generic unsplash stock photo, update it to their own email picture
+          if (!saved.picture || (typeof saved.picture === 'string' && saved.picture.includes('unsplash.com'))) {
+            saved.picture = getEmailProfilePhoto(saved.email);
+          }
+          // Upgrade all logged in users to 2026 per platform standard
+          saved.memberSince = '2026';
+          try {
+            localStorage.setItem('godysell_user', JSON.stringify(saved));
+          } catch {}
+          return saved;
         }
-        // Upgrade all logged in users to 2026 per platform standard
-        saved.memberSince = '2026';
-        localStorage.setItem('godysell_user', JSON.stringify(saved));
-        return saved;
       }
     } catch (e) {
       console.error(e);
     }
     return null;
   });
+
+  // Mandatory Auth Modal Controls
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [authModalReason, setAuthModalReason] = useState<AuthPromptReason>('general');
+  const [authModalMode, setAuthModalMode] = useState<AuthModalMode>('login');
+  const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
+
+  const openAuthModal = (reason: AuthPromptReason = 'general', mode: AuthModalMode = 'login', pending?: PendingAction) => {
+    setAuthModalReason(reason);
+    setAuthModalMode(mode);
+    if (pending) {
+      setPendingAction(pending);
+    }
+    setIsAuthModalOpen(true);
+  };
+
+  const closeAuthModal = () => {
+    setIsAuthModalOpen(false);
+  };
+
+  const clearPendingAction = () => {
+    setPendingAction(null);
+  };
+
+  const requireAuth = (reason: AuthPromptReason = 'general', pending?: PendingAction): boolean => {
+    if (user) return true;
+    openAuthModal(reason, 'login', pending);
+    return false;
+  };
 
   const loginWithGoogle = (profile: Partial<UserProfile>) => {
     const rawEmail = profile.email?.trim().toLowerCase() || '';
@@ -205,6 +260,43 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } catch (e) {
       console.error(e);
     }
+
+    // Resolve any action that was pending authentication
+    if (pendingAction) {
+      const action = pendingAction;
+      setPendingAction(null);
+      setIsAuthModalOpen(false);
+
+      setTimeout(() => {
+        if (action.type === 'sell') {
+          setEditingProduct(null);
+          setIsCreateProductModalOpen(true);
+        } else if (action.type === 'buy_order') {
+          if (action.product) {
+            setSelectedProduct(action.product);
+          }
+        } else if (action.type === 'buy_whatsapp') {
+          if (action.product) {
+            setSelectedProduct(action.product);
+          }
+          if (action.whatsAppLink && typeof window !== 'undefined') {
+            window.open(action.whatsAppLink, '_blank');
+          }
+        } else if (action.type === 'buy_chat') {
+          if (action.product) {
+            startOrOpenChatForProduct(action.product, action.offerNote, action.offerAmount);
+            setSelectedProduct(null);
+            setActiveView('chats');
+          }
+        } else if (action.type === 'management') {
+          setActiveView('management');
+        } else if (action.type === 'chats') {
+          setActiveView('chats');
+        }
+      }, 150);
+    } else {
+      setIsAuthModalOpen(false);
+    }
   };
 
   const updateUserProfile = (updates: Partial<UserProfile>) => {
@@ -244,6 +336,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setUser(null);
     setConversations([]);
     setActiveConversationId(null);
+    setPendingAction(null);
     try {
       localStorage.removeItem('godysell_user');
     } catch (e) {
@@ -298,8 +391,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       const saved = localStorage.getItem('jiji_gh_orders');
       if (saved) {
-        const parsed: Order[] = JSON.parse(saved);
-        return parsed.filter((o) => !DEFAULT_PRODUCT_IDS.has(o.productId) && !o.productId.startsWith('prod-00'));
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          return parsed.filter((o) => o && o.productId && !DEFAULT_PRODUCT_IDS.has(o.productId) && !o.productId.startsWith('prod-00'));
+        }
       }
     } catch (e) {
       console.error(e);
@@ -312,8 +407,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       const saved = localStorage.getItem('jiji_gh_inquiries');
       if (saved) {
-        const parsed: Inquiry[] = JSON.parse(saved);
-        return parsed.filter((inq) => !DEFAULT_PRODUCT_IDS.has(inq.productId) && !inq.productId.startsWith('prod-00'));
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          return parsed.filter((inq) => inq && inq.productId && !DEFAULT_PRODUCT_IDS.has(inq.productId) && !inq.productId.startsWith('prod-00'));
+        }
       }
     } catch (e) {
       console.error(e);
@@ -449,8 +546,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const startOrOpenChatForProduct = (product: Product, initialMessage?: string, initialOffer?: number): string => {
-    const currentEmail = user?.email?.trim().toLowerCase() || 'user@example.com';
-    const currentName = user?.name || 'Customer';
+    if (!user) {
+      requireAuth('buying', {
+        type: 'buy_chat',
+        product,
+        offerAmount: initialOffer,
+        offerNote: initialMessage
+      });
+      return '';
+    }
+
+    const currentEmail = user.email.trim().toLowerCase();
+    const currentName = user.name || 'Customer';
 
     // Check if conversation already exists for this product in current account
     const existing = conversations.find(
@@ -566,8 +673,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       const saved = localStorage.getItem('jiji_gh_favorites');
       if (saved) {
-        const parsed: string[] = JSON.parse(saved);
-        return parsed.filter((id) => !DEFAULT_PRODUCT_IDS.has(id));
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          return parsed.filter((id) => typeof id === 'string' && !DEFAULT_PRODUCT_IDS.has(id));
+        }
       }
     } catch (e) {
       console.error(e);
@@ -579,7 +688,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [announcement, setAnnouncement] = useState<SiteAnnouncement>(() => {
     try {
       const saved = localStorage.getItem('jiji_gh_announcement');
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed === 'object') return parsed;
+      }
     } catch (e) {
       console.error(e);
     }
@@ -851,8 +963,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const addProduct = async (productData: Omit<Product, 'id' | 'views' | 'inquiries' | 'salesCount' | 'createdAt'>): Promise<boolean> => {
-    const finalSellerEmail = user?.email?.trim().toLowerCase() || 'vendor@godysell.com';
-    const finalSellerName = productData.sellerName?.trim() || user?.name || 'Seller';
+    if (!user) {
+      requireAuth('selling', { type: 'sell' });
+      return false;
+    }
+
+    const finalSellerEmail = user.email.trim().toLowerCase();
+    const finalSellerName = productData.sellerName?.trim() || user.name || 'Seller';
     
     // Determine seller phone: form input takes priority, then user profile phone. Never fabricate or default.
     const enteredPhone = productData.sellerPhone !== undefined ? productData.sellerPhone.trim() : '';
@@ -916,7 +1033,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (typeof window !== 'undefined') {
       fetch('/api/products', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-user-email': finalSellerEmail
+        },
         body: JSON.stringify(newProduct)
       }).catch(() => {});
     }
@@ -1125,6 +1245,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const openCreateProductModal = (prodToEdit?: Product) => {
+    if (!user) {
+      requireAuth('selling', { type: 'sell' });
+      return;
+    }
     if (prodToEdit && !isProductOwner(prodToEdit)) {
       alert("You cannot edit this product because it was published by another seller.");
       return;
@@ -1142,6 +1266,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const closeRecordSaleModal = () => setIsRecordSaleModalOpen(false);
 
   const openChatModal = (product: Product) => {
+    if (!user) {
+      requireAuth('buying', { type: 'buy_chat', product });
+      return;
+    }
     setChatProduct(product);
     setIsChatModalOpen(true);
   };
@@ -1231,6 +1359,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         isSyncing,
         syncError,
         refreshProducts,
+        isAuthModalOpen,
+        authModalReason,
+        authModalMode,
+        pendingAction,
+        openAuthModal,
+        closeAuthModal,
+        requireAuth,
+        clearPendingAction,
         setSearchQuery,
         setSelectedCategory,
         setSelectedRegion,

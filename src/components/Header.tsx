@@ -27,7 +27,9 @@ export const Header: React.FC = () => {
     logout,
     totalUnreadChatCount,
     showOnlySaved,
-    setShowOnlySaved
+    setShowOnlySaved,
+    openAuthModal,
+    requireAuth
   } = useApp();
 
   const [showUserMenu, setShowUserMenu] = useState(false);
@@ -109,7 +111,13 @@ export const Header: React.FC = () => {
               Shop
             </button>
             <button
-              onClick={() => setActiveView('management')}
+              onClick={() => {
+                if (!user) {
+                  requireAuth('selling', { type: 'management' });
+                  return;
+                }
+                setActiveView('management');
+              }}
               className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors ${
                 activeView === 'management'
                   ? 'bg-white text-slate-900 shadow-2xs'
@@ -119,7 +127,13 @@ export const Header: React.FC = () => {
               Seller Hub
             </button>
             <button
-              onClick={() => setActiveView('chats')}
+              onClick={() => {
+                if (!user) {
+                  requireAuth('buying', { type: 'chats' });
+                  return;
+                }
+                setActiveView('chats');
+              }}
               className={`px-3 py-1.5 text-xs font-semibold rounded-md transition-colors relative ${
                 activeView === 'chats'
                   ? 'bg-white text-slate-900 shadow-2xs'
@@ -192,8 +206,8 @@ export const Header: React.FC = () => {
             </select>
           </div>
 
-          {/* User Profile Dropdown */}
-          {user && (
+          {/* User Profile Dropdown (when logged in) OR Login / Create Account Buttons (when guest) */}
+          {user ? (
             <div className="relative">
               <button
                 type="button"
@@ -277,6 +291,23 @@ export const Header: React.FC = () => {
                 </>
               )}
             </div>
+          ) : (
+            <div className="flex items-center gap-1.5 sm:gap-2">
+              <button
+                type="button"
+                onClick={() => openAuthModal('general', 'login')}
+                className="px-2.5 sm:px-3 py-1.5 text-xs font-semibold text-slate-700 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors whitespace-nowrap"
+              >
+                Login
+              </button>
+              <button
+                type="button"
+                onClick={() => openAuthModal('general', 'create')}
+                className="px-2.5 sm:px-3.5 py-1.5 text-xs font-semibold text-white bg-emerald-800 hover:bg-emerald-900 rounded-lg transition-colors shadow-2xs whitespace-nowrap"
+              >
+                Create Account
+              </button>
+            </div>
           )}
         </div>
       </div>
@@ -301,7 +332,13 @@ export const Header: React.FC = () => {
             </button>
 
             <button
-              onClick={() => setActiveView('management')}
+              onClick={() => {
+                if (!user) {
+                  requireAuth('selling', { type: 'management' });
+                  return;
+                }
+                setActiveView('management');
+              }}
               className={`flex-1 py-1.5 px-2 rounded-md text-xs font-semibold text-center transition-colors ${
                 activeView === 'management'
                   ? 'bg-white text-slate-900 shadow-2xs'
@@ -312,7 +349,13 @@ export const Header: React.FC = () => {
             </button>
 
             <button
-              onClick={() => setActiveView('chats')}
+              onClick={() => {
+                if (!user) {
+                  requireAuth('buying', { type: 'chats' });
+                  return;
+                }
+                setActiveView('chats');
+              }}
               className={`flex-1 py-1.5 px-2 rounded-md text-xs font-semibold text-center transition-colors relative ${
                 activeView === 'chats'
                   ? 'bg-white text-slate-900 shadow-2xs'

@@ -2,12 +2,12 @@
  * Resolves the person's own profile photo associated with their email address.
  * Uses the email's linked public profile image (Google/Gravatar), or Google's native letter initial badge.
  */
-export function getEmailProfilePhoto(email: string, customImage?: string): string {
-  if (customImage && customImage.trim() !== '') {
+export function getEmailProfilePhoto(email?: string | null, customImage?: string | null): string {
+  if (customImage && typeof customImage === 'string' && customImage.trim() !== '') {
     return customImage;
   }
 
-  if (!email || !email.includes('@')) {
+  if (!email || typeof email !== 'string' || !email.includes('@')) {
     return `https://ui-avatars.com/api/?name=User&background=00b53f&color=fff&size=128&bold=true`;
   }
 

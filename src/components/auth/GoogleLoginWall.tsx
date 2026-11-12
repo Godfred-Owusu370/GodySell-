@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useApp } from '../../context/AppContext';
-import { UserPlus, ArrowRight, X, ShieldCheck, Trash2 } from 'lucide-react';
+import { UserPlus, ArrowRight, X, ShieldCheck, Trash2, LogIn, ShoppingCart, Store, CheckCircle2 } from 'lucide-react';
 import godysellLogo from '../../assets/images/godysell_logo.png';
 import { getEmailProfilePhoto } from '../../utils/avatar';
 
@@ -14,26 +14,44 @@ interface GoogleAccountItem {
 }
 
 export const GoogleLoginWall: React.FC = () => {
-  const { loginWithGoogle, setActiveView } = useApp();
+  const {
+    isAuthModalOpen,
+    authModalReason,
+    authModalMode,
+    closeAuthModal,
+    loginWithGoogle,
+    clearPendingAction
+  } = useApp();
 
-  const [isChooserOpen, setIsChooserOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<'login' | 'create'>('login');
   const [showAddNewAccount, setShowAddNewAccount] = useState(false);
-  const [newEmail, setNewEmail] = useState('');
-  const [newName, setNewName] = useState('');
+  const [emailInput, setEmailInput] = useState('');
+  const [nameInput, setNameInput] = useState('');
+  const [phoneInput, setPhoneInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
 
-  // Load saved accounts strictly from this specific device's localStorage.
+  // Sync activeTab with authModalMode whenever modal opens
+  useEffect(() => {
+    if (isAuthModalOpen) {
+      setActiveTab(authModalMode || 'login');
+      setShowAddNewAccount(false);
+    }
+  }, [isAuthModalOpen, authModalMode]);
+
+  // Load saved accounts from localStorage
   const [accounts, setAccounts] = useState<GoogleAccountItem[]>(() => {
     try {
       const saved = localStorage.getItem('godysell_google_accounts');
       if (saved) {
-        const parsed: GoogleAccountItem[] = JSON.parse(saved);
-        const cleaned = parsed.filter((a) => a.id !== 'acc-1');
-        if (cleaned.length !== parsed.length) {
-          localStorage.setItem('godysell_google_accounts', JSON.stringify(cleaned));
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          const cleaned = parsed.filter((a) => a && typeof a === 'object' && a.id !== 'acc-1');
+          if (cleaned.length !== parsed.length) {
+            localStorage.setItem('godysell_google_accounts', JSON.stringify(cleaned));
+          }
+          return cleaned;
         }
-        return cleaned;
       }
     } catch {
       // fallback
@@ -71,18 +89,19 @@ export const GoogleLoginWall: React.FC = () => {
     }, 450);
   };
 
-  const handleAddCustomAccount = (e: React.FormEvent) => {
+  const handleAccountSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newEmail.trim()) return;
+    if (!emailInput.trim()) return;
 
-    const email = newEmail.trim().toLowerCase();
-    const autoName = email.split('@')[0]
+    const email = emailInput.trim().toLowerCase();
+    const autoName = email
+      .split('@')[0]
       .split(/[._-]/)
       .filter(Boolean)
       .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
       .join(' ') || 'Google User';
 
-    const name = newName.trim() || autoName;
+    const name = nameInput.trim() || autoName;
     const picture = getEmailProfilePhoto(email);
 
     const newAcc: GoogleAccountItem = {
@@ -91,7 +110,7 @@ export const GoogleLoginWall: React.FC = () => {
       email,
       picture,
       memberSince: '2026',
-      phone: ''
+      phone: phoneInput.trim()
     };
 
     const updated = [newAcc, ...accounts.filter((a) => a.email.toLowerCase() !== email)];
@@ -100,156 +119,164 @@ export const GoogleLoginWall: React.FC = () => {
     handleSelectAccount(newAcc);
   };
 
-  const handleOpenLogin = () => {
-    if (accounts.length === 0) {
-      setShowAddNewAccount(true);
-    } else {
-      setShowAddNewAccount(false);
-    }
-    setIsChooserOpen(true);
+  const handleDismiss = () => {
+    clearPendingAction();
+    closeAuthModal();
   };
 
+  if (!isAuthModalOpen) {
+    return null;
+  }
+
+  // Exact user message requirements
+  const isBuyingPrompt = authModalReason === 'buying';
+  const isSellingPrompt = authModalReason === 'selling';
+
   return (
-    <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-4 sm:p-6 relative overflow-hidden font-sans">
-      {/* Main Container Card */}
-      <div className="w-full max-w-sm bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden relative z-10 flex flex-col">
-        <div className="p-6 sm:p-8 space-y-6 text-center">
-          {/* Logo & Brand */}
-          <div className="flex flex-col items-center">
-            <div className="w-28 h-28 flex items-center justify-center">
+    <div
+      role="dialog"
+      aria-modal="true"
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/70 backdrop-blur-xs overflow-y-auto animate-in fade-in duration-150"
+      onClick={handleDismiss}
+    >
+      <div
+        className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden relative my-auto text-left"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Top Header Bar */}
+        <div className="p-4 sm:p-5 border-b border-slate-100 flex items-center justify-between bg-slate-50/70">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-white p-1 border border-slate-200 shadow-2xs flex items-center justify-center shrink-0">
               <img
                 src={godysellLogo}
-                alt="GodySell Ghana"
-                className="w-full h-full object-contain filter drop-shadow-xs"
+                alt="GodySell"
+                className="w-full h-full object-contain"
               />
             </div>
-
-            <div className="mt-2">
-              <p className="text-xs text-slate-500 font-bold uppercase tracking-wider">
-                Ghana&apos;s Verified Marketplace
+            <div>
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs font-black uppercase tracking-wider text-emerald-800">
+                  GodySell Ghana
+                </span>
+                <span className="text-[10px] bg-emerald-100 text-emerald-900 font-bold px-1.5 py-0.2 rounded">
+                  Verified
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-500">
+                {isBuyingPrompt
+                  ? 'Buyer Authentication'
+                  : isSellingPrompt
+                  ? 'Seller Authentication'
+                  : 'Marketplace Sign In'}
               </p>
             </div>
           </div>
 
-          <p className="text-xs text-slate-600 leading-relaxed max-w-xs mx-auto">
-            Sign in to browse listings, communicate directly with buyers and sellers, and manage your inventory.
-          </p>
+          <button
+            type="button"
+            onClick={handleDismiss}
+            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 transition-colors"
+            title="Close and continue browsing"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
 
-          {/* Clean Google Sign In Button */}
-          <div className="space-y-3">
+        {/* Dynamic Context Notification Banner with Required Exact Copy */}
+        <div className="p-4 sm:p-5 space-y-4">
+          {isBuyingPrompt && (
+            <div className="p-3.5 bg-amber-50 border border-amber-200/90 rounded-xl space-y-1 text-left">
+              <div className="flex items-center gap-2 text-amber-900 font-bold text-xs">
+                <ShoppingCart className="w-4 h-4 text-amber-600 shrink-0" />
+                <span>Buyer Account Required</span>
+              </div>
+              <p className="text-xs text-amber-950 font-semibold leading-relaxed">
+                Please log in or create an account to continue buying on GodySell.
+              </p>
+              <p className="text-[11px] text-amber-800/90">
+                Your selected product will be waiting for you immediately after signing in.
+              </p>
+            </div>
+          )}
+
+          {isSellingPrompt && (
+            <div className="p-3.5 bg-emerald-50 border border-emerald-200/90 rounded-xl space-y-1 text-left">
+              <div className="flex items-center gap-2 text-emerald-900 font-bold text-xs">
+                <Store className="w-4 h-4 text-emerald-700 shrink-0" />
+                <span>Seller Account Required</span>
+              </div>
+              <p className="text-xs text-emerald-950 font-semibold leading-relaxed">
+                Join GodySell today! Please log in or create an account before you can start selling your products.
+              </p>
+              <p className="text-[11px] text-emerald-800/90">
+                Reach thousands of active Ghanaian buyers with 0% commission fees.
+              </p>
+            </div>
+          )}
+
+          {!isBuyingPrompt && !isSellingPrompt && (
+            <div className="text-left">
+              <h2 className="text-sm font-bold text-slate-900">
+                Welcome to GodySell Ghana
+              </h2>
+              <p className="text-xs text-slate-600 mt-0.5">
+                Log in or create an account to publish ads, contact sellers, and manage orders.
+              </p>
+            </div>
+          )}
+
+          {/* TWO MANDATORY ACTION BUTTONS: [ Login ] and [ Create Account ] */}
+          <div className="grid grid-cols-2 gap-2 bg-slate-100 p-1 rounded-xl border border-slate-200">
             <button
               type="button"
-              onClick={handleOpenLogin}
-              className="w-full relative flex items-center justify-center gap-3 py-2.5 px-4 bg-white hover:bg-slate-50 text-slate-700 font-semibold text-xs rounded-xl border border-slate-300 shadow-2xs hover:border-slate-400 transition-colors"
+              onClick={() => {
+                setActiveTab('login');
+                setShowAddNewAccount(false);
+              }}
+              className={`py-2 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                activeTab === 'login'
+                  ? 'bg-white text-slate-900 shadow-2xs border border-slate-200/80'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
             >
-              <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24">
-                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
-                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
-              </svg>
-              <span>Continue with Google</span>
+              <LogIn className="w-3.5 h-3.5 text-emerald-700" />
+              <span>Login</span>
             </button>
 
-            <p className="text-[11px] text-slate-400">
-              {accounts.length > 0
-                ? 'Sign in with your saved account on this device'
-                : 'Connect your personal Google account'}
-            </p>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab('create');
+                setShowAddNewAccount(true);
+              }}
+              className={`py-2 px-3 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                activeTab === 'create'
+                  ? 'bg-white text-slate-900 shadow-2xs border border-slate-200/80'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <UserPlus className="w-3.5 h-3.5 text-emerald-700" />
+              <span>Create Account</span>
+            </button>
           </div>
-        </div>
 
-        {/* Footer info */}
-        <div className="bg-slate-50 px-6 py-2.5 border-t border-slate-200 text-center text-[11px] text-slate-500 flex items-center justify-center gap-1.5">
-          <ShieldCheck className="w-3.5 h-3.5 text-emerald-700" />
-          <span>Encrypted authentication</span>
-        </div>
-      </div>
-
-      {/* About & Founder info for guests & crawlers */}
-      <div className="mt-6 text-center text-xs text-slate-500 space-x-3">
-        <a
-          href="/about"
-          onClick={(e) => {
-            e.preventDefault();
-            setActiveView('about');
-            window.scrollTo({ top: 0, behavior: 'smooth' });
-          }}
-          className="hover:text-slate-800 underline underline-offset-2 transition-colors font-medium"
-        >
-          About Godysell
-        </a>
-        <span>•</span>
-        <span>
-          Founded by{' '}
-          <a
-            href="/about"
-            onClick={(e) => {
-              e.preventDefault();
-              setActiveView('about');
-              window.scrollTo({ top: 0, behavior: 'smooth' });
-            }}
-            className="text-emerald-700 hover:text-emerald-800 font-semibold underline underline-offset-2 transition-colors"
-          >
-            Godfred Owusu
-          </a>
-        </span>
-      </div>
-
-      {/* GOOGLE SIGN IN / ACCOUNT CHOOSER MODAL */}
-      {isChooserOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-2xs">
-          <div
-            className="w-full max-w-sm bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden text-left relative"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Header: Google Logo & Close */}
-            <div className="p-4 pb-3 border-b border-slate-100 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <svg className="w-5 h-5" viewBox="0 0 24 24">
-                  <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-                  <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-                  <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
-                  <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
-                </svg>
-                <span className="font-semibold text-slate-800 text-xs">Google</span>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setIsChooserOpen(false);
-                  setShowAddNewAccount(false);
-                }}
-                className="p-1 rounded-md text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
-                title="Cancel"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="p-5 space-y-4">
-              <div>
-                <h2 className="text-base font-bold text-slate-900 tracking-tight">
-                  {accounts.length > 0 && !showAddNewAccount ? 'Choose an account' : 'Sign in with Google'}
-                </h2>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  to continue to <span className="font-semibold text-slate-800">GodySell Ghana</span>
-                </p>
-              </div>
-
-              {/* Show Account Chooser ONLY if this device has accounts and user is not adding a new one */}
+          {/* TAB 1: LOGIN MODE */}
+          {activeTab === 'login' && (
+            <div className="space-y-3 pt-1">
               {accounts.length > 0 && !showAddNewAccount ? (
-                <div className="space-y-1.5 divide-y divide-slate-100">
-                  {/* List of accounts saved strictly on this device */}
-                  <div className="space-y-1">
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-xs text-slate-500 font-medium">
+                    <span>Saved accounts on this device:</span>
+                  </div>
+
+                  <div className="space-y-1.5 max-h-56 overflow-y-auto">
                     {accounts.map((acc) => {
                       const isSelected = selectedAccountId === acc.id && isLoading;
                       return (
                         <div
                           key={acc.id}
-                          className="w-full p-2.5 rounded-xl hover:bg-slate-50 active:bg-slate-100 transition-colors flex items-center justify-between text-left group cursor-pointer border border-transparent hover:border-slate-200"
                           onClick={() => handleSelectAccount(acc)}
+                          className="w-full p-2.5 rounded-xl border border-slate-200 hover:border-emerald-600 hover:bg-emerald-50/30 transition-all flex items-center justify-between text-left cursor-pointer group"
                         >
                           <div className="flex items-center gap-3 min-w-0 flex-1">
                             <img
@@ -258,7 +285,7 @@ export const GoogleLoginWall: React.FC = () => {
                               className="w-9 h-9 rounded-full object-cover border border-slate-200 bg-slate-100 shrink-0"
                             />
                             <div className="min-w-0 flex-1">
-                              <p className="font-semibold text-slate-900 text-xs truncate">
+                              <p className="font-bold text-slate-900 text-xs truncate group-hover:text-emerald-900">
                                 {acc.name}
                               </p>
                               <p className="text-[11px] text-slate-500 truncate">
@@ -269,19 +296,19 @@ export const GoogleLoginWall: React.FC = () => {
 
                           <div className="flex items-center gap-2 shrink-0 ml-2">
                             {isSelected ? (
-                              <div className="w-4 h-4 border-2 border-slate-900 border-t-transparent rounded-full animate-spin shrink-0" />
+                              <div className="w-4 h-4 border-2 border-emerald-700 border-t-transparent rounded-full animate-spin shrink-0" />
                             ) : (
                               <>
                                 <button
                                   type="button"
-                                  title="Remove account from this device"
+                                  title="Remove account from device"
                                   onClick={(e) => handleRemoveAccount(e, acc.id)}
-                                  className="p-1 text-slate-400 hover:text-rose-600 rounded transition-colors"
+                                  className="p-1 text-slate-300 hover:text-rose-600 rounded transition-colors"
                                 >
                                   <Trash2 className="w-3.5 h-3.5" />
                                 </button>
-                                <span className="text-xs text-slate-700 font-semibold group-hover:text-slate-900">
-                                  Select
+                                <span className="text-[11px] text-emerald-800 font-bold bg-emerald-50 group-hover:bg-emerald-100 px-2 py-1 rounded-md transition-colors">
+                                  Login
                                 </span>
                               </>
                             )}
@@ -291,93 +318,133 @@ export const GoogleLoginWall: React.FC = () => {
                     })}
                   </div>
 
-                  {/* Option: Use another account */}
-                  <div className="pt-2">
-                    <button
-                      type="button"
-                      disabled={isLoading}
-                      onClick={() => setShowAddNewAccount(true)}
-                      className="w-full p-2 rounded-xl hover:bg-slate-50 transition-colors flex items-center gap-2.5 text-left group"
-                    >
-                      <div className="w-8 h-8 rounded-full bg-slate-100 text-slate-600 flex items-center justify-center shrink-0 border border-slate-200">
-                        <UserPlus className="w-4 h-4" />
-                      </div>
-                      <div className="min-w-0">
-                        <p className="font-semibold text-slate-800 text-xs">
-                          Use another account
-                        </p>
-                        <p className="text-[11px] text-slate-400">
-                          Sign in with a different Google account
-                        </p>
-                      </div>
-                    </button>
-                  </div>
+                  <button
+                    type="button"
+                    disabled={isLoading}
+                    onClick={() => setShowAddNewAccount(true)}
+                    className="w-full py-2.5 px-3 rounded-xl border border-dashed border-slate-300 hover:border-slate-400 hover:bg-slate-50 transition-colors flex items-center justify-center gap-2 text-xs font-semibold text-slate-700"
+                  >
+                    <UserPlus className="w-4 h-4 text-slate-500" />
+                    <span>Use another Google account</span>
+                  </button>
                 </div>
               ) : (
-                /* Form to enter Google account details for this device */
-                <form onSubmit={handleAddCustomAccount} className="space-y-3 pt-1">
-                  {accounts.length > 0 && (
-                    <div className="flex items-center justify-between pb-1">
-                      <span className="text-xs font-semibold text-slate-800">
-                        Enter Google Account
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => setShowAddNewAccount(false)}
-                        className="text-[11px] text-slate-500 hover:text-slate-800 font-medium"
-                      >
-                        Back to accounts
-                      </button>
-                    </div>
-                  )}
-
+                <form onSubmit={handleAccountSubmit} className="space-y-3">
                   <div>
-                    <label className="block text-xs font-medium text-slate-700 mb-1">
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
                       Google Email Address <span className="text-rose-500">*</span>
                     </label>
                     <input
                       type="email"
                       required
                       autoFocus
-                      placeholder="name@gmail.com"
-                      value={newEmail}
-                      onChange={(e) => setNewEmail(e.target.value)}
-                      className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs focus:outline-none focus:border-slate-500 focus:bg-white font-medium"
+                      placeholder="e.g. kwame@gmail.com"
+                      value={emailInput}
+                      onChange={(e) => setEmailInput(e.target.value)}
+                      className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs focus:outline-none focus:border-emerald-600 focus:bg-white font-medium"
                     />
                   </div>
 
-                  <div>
-                    <label className="block text-xs font-medium text-slate-700 mb-1">
-                      Your Full Name <span className="text-slate-400 font-normal">(optional)</span>
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="e.g. Kwame Mensah"
-                      value={newName}
-                      onChange={(e) => setNewName(e.target.value)}
-                      className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs focus:outline-none focus:border-slate-500 focus:bg-white font-medium"
-                    />
-                  </div>
+                  {accounts.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setShowAddNewAccount(false)}
+                      className="text-[11px] text-slate-500 hover:text-slate-800 font-medium underline"
+                    >
+                      ← Back to saved accounts
+                    </button>
+                  )}
 
                   <button
                     type="submit"
-                    disabled={isLoading || !newEmail.trim()}
-                    className="w-full py-2 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white font-semibold text-xs rounded-lg transition-colors flex items-center justify-center gap-1.5 mt-2 shadow-2xs"
+                    disabled={isLoading || !emailInput.trim()}
+                    className="w-full py-2.5 bg-emerald-800 hover:bg-emerald-900 disabled:opacity-50 text-white font-bold text-xs rounded-xl transition-colors flex items-center justify-center gap-1.5 shadow-2xs"
                   >
-                    <span>{isLoading ? 'Connecting...' : 'Continue'}</span>
+                    <span>{isLoading ? 'Connecting...' : 'Login with Google'}</span>
                     <ArrowRight className="w-3.5 h-3.5" />
                   </button>
                 </form>
               )}
-
-              {/* Privacy Disclosure Footer */}
-              <div className="pt-2 text-[10px] text-slate-400 leading-relaxed border-t border-slate-100">
-                To continue, Google will share your name, email address, language preference, and profile picture with GodySell Ghana.
-              </div>
             </div>
+          )}
+
+          {/* TAB 2: CREATE ACCOUNT MODE */}
+          {activeTab === 'create' && (
+            <form onSubmit={handleAccountSubmit} className="space-y-3 pt-1 text-left">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Full Name or Business Name <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  autoFocus
+                  placeholder="e.g. Kwame Mensah or V-Store Ghana"
+                  value={nameInput}
+                  onChange={(e) => setNameInput(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs focus:outline-none focus:border-emerald-600 focus:bg-white font-medium"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Google Email Address <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="email"
+                  required
+                  placeholder="name@gmail.com"
+                  value={emailInput}
+                  onChange={(e) => setEmailInput(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs focus:outline-none focus:border-emerald-600 focus:bg-white font-medium"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Ghana Phone Number <span className="text-slate-400 font-normal">(WhatsApp / MoMo)</span>
+                </label>
+                <input
+                  type="tel"
+                  placeholder="e.g. 0244123456"
+                  value={phoneInput}
+                  onChange={(e) => setPhoneInput(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-xs focus:outline-none focus:border-emerald-600 focus:bg-white font-medium"
+                />
+                <p className="text-[10px] text-slate-400 mt-0.5">
+                  Used for buyer inquiries and instant doorstep order dispatch.
+                </p>
+              </div>
+
+              <button
+                type="submit"
+                disabled={isLoading || !emailInput.trim()}
+                className="w-full py-2.5 bg-emerald-800 hover:bg-emerald-900 disabled:opacity-50 text-white font-bold text-xs rounded-xl transition-colors flex items-center justify-center gap-1.5 shadow-2xs mt-2"
+              >
+                <span>{isLoading ? 'Creating Account...' : 'Create Account & Continue'}</span>
+                <CheckCircle2 className="w-3.5 h-3.5" />
+              </button>
+            </form>
+          )}
+
+          {/* Guest Dismiss Option */}
+          <div className="pt-2 text-center border-t border-slate-100">
+            <button
+              type="button"
+              onClick={handleDismiss}
+              className="text-xs text-slate-500 hover:text-slate-800 font-semibold transition-colors"
+            >
+              Continue browsing as guest
+            </button>
           </div>
         </div>
-      )}
+
+        {/* Safe Encryption Footer */}
+        <div className="bg-slate-50 px-4 py-2 border-t border-slate-200 text-center text-[10px] text-slate-500 flex items-center justify-center gap-1.5">
+          <ShieldCheck className="w-3.5 h-3.5 text-emerald-700" />
+          <span>Encrypted GodySell Ghana Authentication</span>
+        </div>
+      </div>
     </div>
   );
 };
